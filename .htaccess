@@ -1,0 +1,24 @@
+<IfModule mod_rewrite.c>
+    <IfModule mod_negotiation.c>
+        Options -MultiViews -Indexes
+    </IfModule>
+
+    RewriteEngine On
+
+    # Handle Authorization Header
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # 1. Directly rewrite assets (css, js, images, uploads, etc.) to the public/ folder
+    RewriteRule ^(css|js|images|uploads|fonts|media)/(.*)$ public/$1/$2 [L,QSA,NC]
+    RewriteRule ^(favicon\.ico|robots\.txt)$ public/$1 [L,NC]
+
+    # 2. If the physical file exists, serve directly
+    RewriteCond %{REQUEST_FILENAME} -f
+    RewriteRule ^ - [L]
+
+    # 3. Route all dynamic pages through root index.php
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [L]
+</IfModule>
