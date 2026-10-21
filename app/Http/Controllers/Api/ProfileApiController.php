@@ -215,8 +215,8 @@ class ProfileApiController extends Controller
         // Profile ID formatting
         $profileId = $user->profile_id;
         if (empty($profileId)) {
-            $prefix = $isGroom ? 'PK-GR-' : 'PK-BR-';
-            $profileId = $prefix . (900 + ($user->user_id % 100));
+            $prefix = $isGroom ? 'ALN-G-' : 'ALN-B-';
+            $profileId = $prefix . $user->user_id;
         }
 
         // Helper to find file in storage/users, public/storage, uploads, or images
@@ -327,6 +327,11 @@ class ProfileApiController extends Controller
             'status' => !empty($user->marital_status) ? ucfirst(strtolower(trim($user->marital_status))) : 'Unmarried',
             'city' => $displayCity,
             'full_city' => $city,
+            'contact_number' => !empty(trim($user->mobile ?? '')) ? trim($user->mobile) : (!empty(trim($user->alternate_mobile ?? '')) ? trim($user->alternate_mobile) : ''),
+            'mobile' => !empty(trim($user->mobile ?? '')) ? trim($user->mobile) : '',
+            'alternate_mobile' => !empty(trim($user->alternate_mobile ?? '')) ? trim($user->alternate_mobile) : '',
+            'address' => !empty(trim($user->address ?? '')) ? trim($user->address) : (!empty(trim($user->n_address ?? '')) ? trim($user->n_address) : $city),
+            'n_address' => !empty(trim($user->n_address ?? '')) ? trim($user->n_address) : '',
         ];
 
         if ($detailed) {
@@ -339,7 +344,6 @@ class ProfileApiController extends Controller
             $data['brothers'] = isset($user->brother) && $user->brother !== '' ? trim($user->brother) : '0';
             $data['sisters'] = isset($user->sister) && $user->sister !== '' ? trim($user->sister) : '0';
             $data['prefered_location'] = !empty(trim($user->prefered_location ?? '')) ? trim($user->prefered_location) : 'Lucknow & Nearby / All India';
-            $data['address'] = !empty(trim($user->address ?? '')) ? trim($user->address) : 'Lucknow, Uttar Pradesh';
             $data['disability'] = !empty(trim($user->disability ?? '')) ? trim($user->disability) : 'None';
             $data['package'] = !empty(trim($user->package ?? '')) ? trim($user->package) : 'Silver';
             $data['created_at_formatted'] = $user->created_at ? $user->created_at->format('M Y') : 'Active Member';
@@ -443,6 +447,7 @@ class ProfileApiController extends Controller
             'prefered_location',
             'address',
             'n_address',
+            'mobile',
             'alternate_mobile',
             'additional_info',
         ];
@@ -558,5 +563,127 @@ class ProfileApiController extends Controller
             'message' => 'Password has been updated successfully.',
         ], 200);
     }
+
+    /**
+     * Upload and update profile photo for authenticated member.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function uploadPhoto(Request $request): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->attributes->get('authenticated_member');
+        if (!$user) {
+            $userId = session('user_id');
+            if ($userId) {
+                $user = User::where('user_id', $userId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+            }
+        }
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated. Active member session is required.',
+            ], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'photo' => 'required|image|mimes:jpeg,png,jpg,webp|max:5120',
+        ], [
+            'photo.required' => 'Please select an image file to upload.',
+            'photo.image' => 'The uploaded file must be an image.',
+            'photo.mimes' => 'Photo must be a JPEG, PNG, JPG, or WebP image.',
+            'photo.max' => 'Photo size must not exceed 5MB.',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => $validator->errors()->first(),
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        if ($request->hasFile('photo')) {
+            $file = $request->file('photo');
+            $cleanName = preg_replace('/[^a-zA-Z0-9._-]/', '_', $file->getClientOriginalName());
+            $filename = time() . '-profile_pic-' . $cleanName;
+
+            $destDir = storage_path('app/public/users');
+            if (!file_exists($destDir)) {
+                mkdir($destDir, 0777, true);
+            }
+            $file->move($destDir, $filename);
+
+            $pubDir = public_path('storage/users');
+            if (file_exists($pubDir)) {
+                @copy($destDir . '/' . $filename, $pubDir . '/' . $filename);
+            }
+
+            $user->profile_pic = $filename;
+            $user->modified_at = now();
+            $user->save();
+
+            if (session('user_id') == $user->user_id) {
+                session([
+                    'user' => $user->fresh()->toArray(),
+                    'user_name' => $user->name,
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Profile photo updated successfully.',
+                'photo_url' => asset('storage/users/' . $filename),
+                'data' => $this->formatUserProfile($user->fresh(), true),
+            ], 200);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'No image file found in the request.',
+        ], 422);
+    }
+
+    /**
+     * Get authenticated member profile in standardized format.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function meProfile(Request $request): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->attributes->get('authenticated_member');
+        if (!$user) {
+            $userId = session('user_id');
+            if ($userId) {
+                $user = User::where('user_id', $userId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+            }
+        }
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated. Active member session is required.',
+            ], 401);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Member profile retrieved successfully.',
+            'data' => $this->formatUserProfile($user, true),
+        ]);
+    }
 }
+
 

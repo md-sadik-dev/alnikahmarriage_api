@@ -19,6 +19,10 @@ const AlNikahAPI = (function () {
     }
     if (path.startsWith('images/')) return path;
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    if (path.startsWith('/storage/') || path.startsWith('storage/')) {
+      const clean = path.startsWith('/') ? path.substring(1) : path;
+      return `${BACKEND_URL}/${clean}`;
+    }
     if (path.startsWith('/uploads/') || path.startsWith('uploads/')) {
       const clean = path.startsWith('/') ? path.substring(1) : path;
       return `${BACKEND_URL}/${clean}`;
@@ -298,6 +302,19 @@ const AlNikahAPI = (function () {
       return res;
     },
 
+    uploadProfilePhoto: async (file) => {
+      const formData = new FormData();
+      formData.append('photo', file);
+      const res = await request('/profile/photo', {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.data) {
+        setAuthUser(res.data);
+      }
+      return res;
+    },
+
     changePassword: async (currentPassword, newPassword, newPasswordConfirmation = null) => {
       return await request('/profile/change-password', {
         method: 'POST',
@@ -557,21 +574,33 @@ const AlNikahAPI = (function () {
         }
       }
 
+      // Fetch detailed standardized profile if available
+      try {
+        const profileRes = await AlNikahAPI.getAuthProfile();
+        if (profileRes.success && profileRes.data) {
+          currentUser = { ...currentUser, ...profileRes.data };
+          setAuthUser(currentUser);
+        }
+      } catch (e) {
+        console.warn('Could not fetch detailed auth profile:', e);
+      }
+
       // 2. Populate Real User Topbar, Avatar & Welcome Banner
       const userName = currentUser.name || 'Respected Member';
-      const userProfileId = currentUser.profile_id || `ALN-${currentUser.user_id}`;
-      const isGroom = (currentUser.user_type || '').toUpperCase() === 'GROOM';
+      const isGroom = (currentUser.user_type || '').toUpperCase() === 'GROOM' || (currentUser.gender || '').toLowerCase() === 'groom';
       const defaultAvatar = isGroom ? 'images/groom-1.webp' : 'images/bride-1.webp';
-      const userAvatar = resolveImageUrl(currentUser.profile_pic, defaultAvatar);
+      const userProfileId = currentUser.profile_id || (isGroom ? `ALN-G-${currentUser.user_id || currentUser.id}` : `ALN-B-${currentUser.user_id || currentUser.id}`);
+      const rawAvatar = currentUser.image || currentUser.profile_pic;
+      const userAvatar = resolveImageUrl(rawAvatar, defaultAvatar);
 
       // Topbar user summary
-      const topbarNameEl = document.querySelector('.topbar-profile-summary span[style*="font-weight: 700"]');
+      const topbarNameEl = document.getElementById('topbar-user-name') || document.querySelector('.topbar-profile-summary span[style*="font-weight: 700"]');
       if (topbarNameEl) topbarNameEl.textContent = userName;
 
-      const topbarIdEl = document.querySelector('.topbar-profile-summary span[style*="font-size: 0.78rem"]');
+      const topbarIdEl = document.getElementById('topbar-user-id') || document.querySelector('.topbar-profile-summary span[style*="font-size: 0.78rem"]');
       if (topbarIdEl) topbarIdEl.textContent = `ID: ${userProfileId}`;
 
-      const topbarAvatarEl = document.querySelector('.topbar-avatar');
+      const topbarAvatarEl = document.getElementById('topbar-user-avatar') || document.querySelector('.topbar-avatar');
       if (topbarAvatarEl) {
         topbarAvatarEl.src = userAvatar;
         topbarAvatarEl.onerror = () => { topbarAvatarEl.src = defaultAvatar; };
@@ -637,71 +666,140 @@ const AlNikahAPI = (function () {
       try {
         const editSection = document.getElementById('tab-profile');
         if (editSection) {
-          const inputs = editSection.querySelectorAll('input, select, textarea');
-          inputs.forEach(input => {
-            const group = input.closest('.contact-input-group');
-            if (!group) return;
-            const label = (group.querySelector('.contact-input-label')?.textContent || '').toLowerCase();
+          // Update profile card in Tab 3
+          const editAvatarEl = document.getElementById('edit-profile-avatar');
+          if (editAvatarEl) {
+            editAvatarEl.src = userAvatar;
+            editAvatarEl.onerror = () => { editAvatarEl.src = defaultAvatar; };
+          }
+          const editNameEl = document.getElementById('edit-profile-name');
+          if (editNameEl) editNameEl.textContent = userName;
 
-            if (label.includes('full name') || label.includes('name')) input.value = currentUser.name || '';
-            else if (label.includes('age') || label.includes('dob')) input.value = currentUser.dob || '';
-            else if (label.includes('height')) input.value = currentUser.height || '';
-            else if (label.includes('sect') || label.includes('firqa')) input.value = currentUser.sect || '';
-            else if (label.includes('caste') || label.includes('biradari')) input.value = currentUser.caste || '';
-            else if (label.includes('degree') || label.includes('qualification')) input.value = currentUser.qualification || '';
-            else if (label.includes('profession') || label.includes('work') || label.includes('role')) input.value = currentUser.work || '';
-            else if (label.includes('income')) input.value = currentUser.income || '';
-            else if (label.includes('city') || label.includes('native')) input.value = currentUser.n_address || currentUser.address || '';
-            else if (label.includes('about')) input.value = currentUser.additional_info || '';
-            else if (label.includes('partner') || label.includes('expectation') || label.includes('preferred')) input.value = currentUser.prefered_location || '';
-          });
+          const editIdEl = document.getElementById('edit-profile-id');
+          if (editIdEl) editIdEl.textContent = `ID: ${userProfileId} • Active`;
 
-          // Bind "Update Biodata" button to real API
-          const updateBtn = editSection.querySelector('button[onclick*="Profile changes updated"]');
-          if (updateBtn) {
-            updateBtn.removeAttribute('onclick');
-            updateBtn.onclick = async () => {
-              updateBtn.disabled = true;
-              updateBtn.textContent = 'Saving Changes...';
+          // Helper to set field value
+          const setVal = (id, val) => {
+            const el = document.getElementById(id);
+            if (el && val !== undefined && val !== null && String(val).trim() !== '' && String(val) !== 'No-detail') {
+              el.value = val;
+            }
+          };
 
-              const payload = {};
-              inputs.forEach(input => {
-                const group = input.closest('.contact-input-group');
-                if (!group) return;
-                const label = (group.querySelector('.contact-input-label')?.textContent || '').toLowerCase();
+          setVal('edit-name', currentUser.name || '');
+          setVal('edit-dob', currentUser.age_dob || currentUser.dob || currentUser.age || '');
+          setVal('edit-height', currentUser.height || '');
+          setVal('edit-firqa', currentUser.firqa || currentUser.sect || '');
+          setVal('edit-caste', currentUser.caste || '');
+          setVal('edit-qualification', currentUser.education || currentUser.qualification || '');
+          setVal('edit-work', currentUser.profession || currentUser.work || '');
+          setVal('edit-income', currentUser.income || '');
+          setVal('edit-city', currentUser.city || currentUser.n_address || currentUser.address || '');
+          setVal('edit-mobile', currentUser.contact_number || currentUser.mobile || '');
+          setVal('edit-alt-mobile', currentUser.alternate_mobile || '');
+          setVal('edit-about', currentUser.additional_info || '');
+          setVal('edit-expectations', currentUser.prefered_location || '');
 
-                if (label.includes('full name') || label.includes('name')) payload.name = input.value;
-                else if (label.includes('age') || label.includes('dob')) payload.dob = input.value;
-                else if (label.includes('height')) payload.height = input.value;
-                else if (label.includes('sect') || label.includes('firqa')) payload.sect = input.value;
-                else if (label.includes('caste') || label.includes('biradari')) payload.caste = input.value;
-                else if (label.includes('degree') || label.includes('qualification')) payload.qualification = input.value;
-                else if (label.includes('profession') || label.includes('work') || label.includes('role')) payload.work = input.value;
-                else if (label.includes('income')) payload.income = input.value;
-                else if (label.includes('city') || label.includes('native')) payload.n_address = input.value;
-                else if (label.includes('about')) payload.additional_info = input.value;
-                else if (label.includes('partner') || label.includes('expectation') || label.includes('preferred')) payload.prefered_location = input.value;
-              });
+          // Photo Upload Handling
+          const btnChangePhoto = document.getElementById('btn-change-photo');
+          const photoInput = document.getElementById('user-photo-file-input');
+          const photoStatus = document.getElementById('photo-upload-status');
+
+          if (btnChangePhoto && photoInput) {
+            btnChangePhoto.onclick = () => photoInput.click();
+
+            photoInput.onchange = async () => {
+              const file = photoInput.files[0];
+              if (!file) return;
+
+              if (photoStatus) {
+                photoStatus.style.display = 'block';
+                photoStatus.style.color = '#786e6b';
+                photoStatus.textContent = 'Uploading photo...';
+              }
+              btnChangePhoto.disabled = true;
 
               try {
-                const updateRes = await AlNikahAPI.updateProfile(payload);
-                if (updateRes.success) {
-                  showToast('Alhamdulillah! Profile changes saved successfully.', 'success');
-                  if (updateRes.data && updateRes.data.name) {
-                    if (topbarNameEl) topbarNameEl.textContent = updateRes.data.name;
-                    if (welcomeH1) welcomeH1.textContent = `Welcome Back, ${updateRes.data.name}`;
+                const uploadRes = await AlNikahAPI.uploadProfilePhoto(file);
+                if (uploadRes.success) {
+                  const newImg = uploadRes.photo_url || (uploadRes.data && uploadRes.data.image) || resolveImageUrl(uploadRes.data?.profile_pic);
+                  showToast('Alhamdulillah! Profile photo updated successfully.', 'success');
+                  if (editAvatarEl && newImg) editAvatarEl.src = newImg;
+                  if (topbarAvatarEl && newImg) topbarAvatarEl.src = newImg;
+                  if (photoStatus) {
+                    photoStatus.style.color = '#1b5e20';
+                    photoStatus.textContent = '✓ Photo updated successfully';
                   }
                 } else {
-                  showToast(updateRes.message || 'Could not update profile.', 'error');
+                  showToast(uploadRes.message || 'Failed to upload photo.', 'error');
+                  if (photoStatus) {
+                    photoStatus.style.color = '#b71c1c';
+                    photoStatus.textContent = uploadRes.message || 'Upload failed.';
+                  }
                 }
-              } catch (e) {
-                showToast(e.message || 'Failed to connect to API.', 'error');
+              } catch (err) {
+                showToast(err.message || 'Photo upload error.', 'error');
+                if (photoStatus) {
+                  photoStatus.style.color = '#b71c1c';
+                  photoStatus.textContent = 'Error uploading photo.';
+                }
               } finally {
-                updateBtn.disabled = false;
-                updateBtn.textContent = 'Update Biodata';
+                btnChangePhoto.disabled = false;
               }
             };
           }
+
+          // Save / Update Biodata Handler
+          const handleUpdateBiodata = async (triggerBtn) => {
+            if (triggerBtn) {
+              triggerBtn.disabled = true;
+              triggerBtn.dataset.originalText = triggerBtn.textContent;
+              triggerBtn.textContent = 'Saving...';
+            }
+
+            const payload = {
+              name: document.getElementById('edit-name')?.value || '',
+              dob: document.getElementById('edit-dob')?.value || '',
+              height: document.getElementById('edit-height')?.value || '',
+              sect: document.getElementById('edit-firqa')?.value || '',
+              caste: document.getElementById('edit-caste')?.value || '',
+              qualification: document.getElementById('edit-qualification')?.value || '',
+              work: document.getElementById('edit-work')?.value || '',
+              income: document.getElementById('edit-income')?.value || '',
+              n_address: document.getElementById('edit-city')?.value || '',
+              mobile: document.getElementById('edit-mobile')?.value || '',
+              alternate_mobile: document.getElementById('edit-alt-mobile')?.value || '',
+              additional_info: document.getElementById('edit-about')?.value || '',
+              prefered_location: document.getElementById('edit-expectations')?.value || '',
+            };
+
+            try {
+              const updateRes = await AlNikahAPI.updateProfile(payload);
+              if (updateRes.success) {
+                showToast('Alhamdulillah! Profile changes saved successfully.', 'success');
+                if (updateRes.data && updateRes.data.name) {
+                  if (topbarNameEl) topbarNameEl.textContent = updateRes.data.name;
+                  if (editNameEl) editNameEl.textContent = updateRes.data.name;
+                  if (welcomeH1) welcomeH1.textContent = `Welcome Back, ${updateRes.data.name}`;
+                }
+              } else {
+                showToast(updateRes.message || 'Could not update profile.', 'error');
+              }
+            } catch (e) {
+              showToast(e.message || 'Failed to save profile changes.', 'error');
+            } finally {
+              if (triggerBtn) {
+                triggerBtn.disabled = false;
+                triggerBtn.textContent = triggerBtn.dataset.originalText || 'Save Changes';
+              }
+            }
+          };
+
+          const updateBtn = document.getElementById('btn-update-biodata');
+          if (updateBtn) updateBtn.onclick = () => handleUpdateBiodata(updateBtn);
+
+          const saveHeaderBtn = document.getElementById('btn-save-biodata-header');
+          if (saveHeaderBtn) saveHeaderBtn.onclick = () => handleUpdateBiodata(saveHeaderBtn);
         }
       } catch (err) {
         console.warn('Could not wire edit profile form:', err);

@@ -1,0 +1,2851 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title id="page-title">
+      Profile Details | Al-Nikah Muslim Matrimonial Services
+    </title>
+    <meta
+      name="description"
+      content="View verified Muslim matrimonial profile. Connect with traditional values and family trust through Al-Nikah Matrimonial Bureau."
+    />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/webp" href="images/logo.webp" />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Amiri:wght@400;700&family=Caveat:wght@700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Master Stylesheet -->
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <style>
+      :root {
+        --color-burgundy: #6a0b14;
+        --color-burgundy-dark: #520103;
+        --color-gold: #c5a059;
+        --color-gold-light: #f5eedb;
+        --color-cream-bg: #faf7f2;
+        --color-card-border: #ebdcc9;
+      }
+
+      /* Reference Screenshot Photo Slider & Gallery Styles */
+      .profile-photo-slider-card {
+        position: relative;
+        width: 100%;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 2px solid var(--color-burgundy);
+        background: #1a0507;
+        aspect-ratio: 4 / 3;
+        box-shadow: 0 6px 20px rgba(106, 11, 20, 0.18);
+        margin-bottom: 12px;
+      }
+      .profile-slider-main-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        transition: opacity 0.25s ease;
+      }
+      .slider-nav-btn {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.92);
+        color: var(--color-burgundy);
+        border: 1px solid var(--color-gold);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 800;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+        transition: all 0.2s ease;
+        z-index: 10;
+        user-select: none;
+      }
+      .slider-nav-btn:hover {
+        background: var(--color-burgundy);
+        color: #ffffff;
+        transform: translateY(-50%) scale(1.1);
+      }
+      .slider-prev-btn {
+        left: 8px;
+      }
+      .slider-next-btn {
+        right: 8px;
+      }
+      .slider-counter-badge {
+        position: absolute;
+        bottom: 10px;
+        right: 10px;
+        background: rgba(82, 1, 3, 0.88);
+        color: #ffffff;
+        border: 1px solid var(--color-gold);
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        z-index: 10;
+        pointer-events: none;
+      }
+      .profile-thumbnails-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-bottom: 18px;
+      }
+      .profile-thumb-btn {
+        aspect-ratio: 1;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 2px solid #e2d3c1;
+        padding: 0;
+        cursor: pointer;
+        background: #faf7f2;
+        transition: all 0.2s ease;
+      }
+      .profile-thumb-btn.active,
+      .profile-thumb-btn:hover {
+        border-color: var(--color-burgundy);
+        box-shadow: 0 0 0 2px var(--color-gold);
+        transform: translateY(-2px);
+      }
+      .profile-thumb-btn img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .btn-action-download-pdf {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 11px 22px;
+        background: linear-gradient(135deg, #6a0b14, #8b0f1b);
+        color: #ffffff;
+        font-size: 0.95rem;
+        font-weight: 800;
+        border-radius: 8px;
+        text-decoration: none;
+        box-shadow: 0 4px 16px rgba(106, 11, 20, 0.35);
+        border: 1.5px solid #c5a059;
+        cursor: pointer;
+        transition: all 0.25s ease;
+      }
+      .btn-action-download-pdf:hover {
+        background: linear-gradient(135deg, #830e1a, #520103);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(106, 11, 20, 0.45);
+        color: #ffffff;
+      }
+
+      /* Layout grid */
+      .profile-detail-grid {
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        gap: 32px;
+        align-items: start;
+        margin: 36px 0 60px;
+      }
+      @media (max-width: 991px) {
+        .profile-detail-grid {
+          grid-template-columns: 1fr;
+          gap: 24px;
+        }
+      }
+      .profile-sidebar-card {
+        background: #ffffff;
+        border: 1.5px solid var(--color-card-border);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 8px 30px rgba(106, 11, 20, 0.06);
+      }
+      .sidebar-candidate-name {
+        font-size: 1.45rem;
+        font-weight: 800;
+        color: #2b1c1d;
+        margin: 8px 0 6px;
+      }
+      .sidebar-quick-specs {
+        list-style: none;
+        padding: 14px 0 0;
+        margin: 0;
+      }
+      .sidebar-quick-specs li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 0;
+        font-size: 0.88rem;
+        border-bottom: 1px dashed #ebdcc9;
+      }
+      .sidebar-quick-specs li:last-child {
+        border-bottom: none;
+      }
+      .sidebar-quick-specs .spec-label {
+        color: #6c5c56;
+        font-weight: 600;
+      }
+      .sidebar-quick-specs .spec-val {
+        color: #241617;
+        font-weight: 700;
+        text-align: right;
+      }
+
+      /* Right column main content */
+
+      .profile-title-h1 {
+        font-size: 2rem;
+        font-weight: 800;
+        color: var(--color-burgundy-dark);
+        margin: 0 0 6px;
+      }
+      .profile-sub-meta {
+        color: #6b5c56;
+        font-size: 0.95rem;
+        font-weight: 600;
+      }
+      .btn-action-download-pdf-sm {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 8px 16px;
+        background: #6a0b14;
+        color: #ffffff;
+        font-size: 0.86rem;
+        font-weight: 700;
+        border-radius: 7px;
+        border: 1.5px solid #c5a059;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 8px rgba(106, 11, 20, 0.25);
+        text-decoration: none;
+      }
+      /* Highlights 4 Cards */
+      .highlights-cards-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 14px;
+      }
+      @media (max-width: 768px) {
+        .highlights-cards-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      .highlight-card {
+        background: #faf7f2;
+        border: 1px solid #dfd0be;
+        border-left: 3px solid var(--color-gold);
+        border-radius: 8px;
+        padding: 12px 14px;
+      }
+      .highlight-label {
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #7d6b63;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 4px;
+      }
+      .highlight-val {
+        font-size: 0.96rem;
+        font-weight: 700;
+        color: #2b1c1d;
+      }
+
+      /* Hadith Banner */
+      .hadith-quote-banner {
+        background: linear-gradient(135deg, #fbf7f0, #f5ecd8);
+        border: 1.5px solid var(--color-gold);
+        border-radius: 12px;
+        padding: 16px 20px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .hadith-heart-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: var(--color-burgundy);
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+      .hadith-arabic {
+        font-family: "Amiri", serif;
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--color-burgundy);
+        margin-bottom: 4px;
+      }
+      .hadith-translation {
+        font-size: 0.86rem;
+        color: #55443e;
+        font-style: italic;
+      }
+
+      /* Section Cards */
+      .biodata-section-card {
+        background: #ffffff;
+        border: 1.5px solid var(--color-card-border);
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 18px rgba(106, 11, 20, 0.04);
+      }
+      .biodata-card-header {
+        background: #faf7f2;
+        border-bottom: 1px solid var(--color-card-border);
+        padding: 14px 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .biodata-card-title {
+        font-size: 1.15rem;
+        font-weight: 800;
+        color: var(--color-burgundy);
+        margin: 0;
+      }
+      .biodata-card-body {
+        padding: 20px;
+      }
+      .biodata-table-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px 24px;
+      }
+      @media (max-width: 600px) {
+        .biodata-table-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .bio-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #f3ece2;
+      }
+      .bio-label {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: #796860;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+      .bio-val {
+        font-size: 0.98rem;
+        font-weight: 700;
+        color: #241617;
+      }
+
+      .btn-action-primary {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        width: 100%;
+        padding: 13px 20px;
+        background: linear-gradient(135deg, var(--color-burgundy), #8b0f1b);
+        color: #ffffff;
+        font-size: 0.95rem;
+        font-weight: 700;
+        border-radius: 8px;
+        text-decoration: none;
+        box-shadow: 0 4px 14px rgba(106, 11, 20, 0.3);
+        transition: all 0.2s ease;
+        margin-top: 14px;
+        border: none;
+        cursor: pointer;
+      }
+      .btn-action-primary:hover {
+        background: linear-gradient(135deg, #520103, #6a0b14);
+        transform: translateY(-2px);
+      }
+      .btn-action-whatsapp {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        width: 100%;
+        padding: 12px 20px;
+        background: #25d366;
+        color: #ffffff;
+        font-size: 0.92rem;
+        font-weight: 700;
+        border-radius: 8px;
+        text-decoration: none;
+        margin-top: 10px;
+        transition: all 0.2s ease;
+      }
+      .btn-action-whatsapp:hover {
+        background: #1eb954;
+        transform: translateY(-2px);
+      }
+      .pdf-footer {
+        margin-top: 14px !important;
+        padding-top: 10px !important;
+        padding-bottom: 8px !important;
+        line-height: 1.5 !important;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- =========================================================
+       TWO-LEVEL HEADER
+       ========================================================= -->
+    <header class="site-header" id="site-header">
+      <div class="top-header">
+        <div class="container top-header-inner">
+          <div class="header-brand-wrap">
+            <a
+              href="index.html"
+              class="brand-logo"
+              aria-label="Al-Nikah Matrimonial Homepage"
+            >
+              <img
+                src="images/logo.webp"
+                alt="Al-Nikah Logo"
+                class="brand-logo-img"
+                width="85"
+                height="85"
+              />
+              <div class="brand-title-wrap">
+                <span class="brand-name">AL NIKAH</span>
+                <span class="brand-tagline">The Marriage in Islam</span>
+              </div>
+            </a>
+          </div>
+
+          <div
+            class="top-contact-details"
+            aria-label="Organization Contact Information"
+          >
+            <div class="contact-pill">
+              <svg
+                class="header-icon"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+              <span>132/2A New Friends Colony, Jankipuram Ext, Lucknow</span>
+            </div>
+
+            <a href="mailto:alnikahxlko@gmail.com" class="contact-pill">
+              <svg
+                class="header-icon"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+              </svg>
+              <span>alnikahxlko@gmail.com</span>
+            </a>
+
+            <a href="tel:05224045930" class="contact-pill">
+              <svg
+                class="header-icon"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"
+                ></path>
+              </svg>
+              <span>0522-4045930</span>
+            </a>
+          </div>
+
+          <div class="top-header-actions">
+            <div class="header-auth-buttons">
+              <a href="login.html" class="btn btn-outline btn-sm" id="btn-login"
+                >Login</a
+              >
+              <a
+                href="signup.html"
+                class="btn btn-burgundy-light btn-sm"
+                id="btn-signup"
+                >Sign Up</a
+              >
+            </div>
+            <button
+              type="button"
+              class="mobile-menu-toggle"
+              id="mobile-menu-toggle"
+              aria-expanded="false"
+              aria-controls="primary-nav-menu"
+              aria-label="Toggle navigation menu"
+            >
+              <span class="hamburger-line line-1"></span>
+              <span class="hamburger-line line-2"></span>
+              <span class="hamburger-line line-3"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- PRIMARY STICKY NAVBAR -->
+    <nav class="primary-nav-bar" aria-label="Main Navigation">
+      <div class="container nav-container">
+        <ul class="nav-menu" id="primary-nav-menu">
+          <li class="nav-item">
+            <a href="index.html" class="nav-link">Home</a>
+          </li>
+          <li class="nav-item">
+            <a href="about-us.html" class="nav-link">About Us</a>
+          </li>
+          <li class="nav-item">
+            <a href="founder-message.html" class="nav-link">Founder Message</a>
+          </li>
+          <li class="nav-item">
+            <a href="services.html" class="nav-link">Services</a>
+          </li>
+          <li class="nav-item">
+            <a href="index.html#section-brides" class="nav-link active"
+              >Bride &amp; Groom</a
+            >
+          </li>
+          <li class="nav-item">
+            <a href="success-stories.html" class="nav-link">Success Stories</a>
+          </li>
+          <li class="nav-item">
+            <a href="terms-and-conditions.html" class="nav-link"
+              >Terms &amp; Conditions</a
+            >
+          </li>
+          <li class="nav-item">
+            <a href="contact-us.html" class="nav-link">Contact Us</a>
+          </li>
+        </ul>
+      </div>
+    </nav>
+
+    <!-- PAGE HERO BREADCRUMB -->
+    <header class="profile-hero-banner">
+      <div class="container">
+        <nav class="profile-page-breadcrumbs">
+          <a href="index.html" style="color: inherit; text-decoration: none"
+            >Home</a
+          >
+          &bull;
+          <a
+            href="index.html#section-brides"
+            style="color: inherit; text-decoration: none"
+            >Bride & Groom Profiles</a
+          >
+          &bull;
+          <span style="color: #fff; font-weight: 700" id="hero-profile-id"
+            >Profile ALN...</span
+          >
+        </nav>
+        <div
+          style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+          "
+        >
+          <div>
+            <h1 class="profile-hero-h1" id="hero-h1">
+              Matrimonial Candidate Profile
+            </h1>
+            <p style="margin: 4px 0 0; color: #ebdcc9; font-size: 0.92rem">
+              Verified Islamic record registered with Al-Nikah Marriage Bureau
+            </p>
+          </div>
+          <span
+            class="pill-badge pill-badge-verified"
+            style="
+              background: #2e7d32;
+              color: #fff;
+              padding: 6px 16px;
+              border-radius: 50px;
+              font-weight: 700;
+              font-size: 0.85rem;
+            "
+          >
+            &#10003; Verified Profile
+          </span>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN PROFILE DETAIL CONTENT -->
+    <main class="container" id="profile-main-wrapper">
+      <div class="profile-detail-grid">
+        <!-- ==========================================
+           LEFT COLUMN: 1/5 PHOTO SLIDER & QUICK SPECS
+           (MATCHING EXACT USER SCREENSHOT REFERENCE)
+           ========================================== -->
+        <aside
+          class="profile-sidebar-card"
+          aria-label="Profile Summary & Gallery"
+        >
+          <!-- 1/5 PHOTO SLIDER BOX -->
+          <div class="profile-photo-slider-card">
+            <img
+              id="slider-main-img"
+              class="profile-slider-main-img"
+              src="images/groom-1.webp"
+              alt="Profile Photo"
+            />
+            <button
+              type="button"
+              class="slider-nav-btn slider-prev-btn"
+              id="slider-prev-btn"
+              aria-label="Previous Photo"
+            >
+              &lt;
+            </button>
+            <button
+              type="button"
+              class="slider-nav-btn slider-next-btn"
+              id="slider-next-btn"
+              aria-label="Next Photo"
+            >
+              &gt;
+            </button>
+            <div class="slider-counter-badge" id="slider-counter">1/5</div>
+          </div>
+
+          <!-- 4 THUMBNAILS ROW UNDERNEATH -->
+          <div class="profile-thumbnails-row" id="thumbnails-row">
+            <button
+              type="button"
+              class="profile-thumb-btn active"
+              data-index="0"
+            >
+              <img src="images/groom-1.webp" alt="Thumbnail 1" />
+            </button>
+            <button type="button" class="profile-thumb-btn" data-index="1">
+              <img src="images/groom-2.webp" alt="Thumbnail 2" />
+            </button>
+            <button type="button" class="profile-thumb-btn" data-index="2">
+              <img src="images/groom-3.webp" alt="Thumbnail 3" />
+            </button>
+            <button type="button" class="profile-thumb-btn" data-index="3">
+              <img src="images/groom-4.webp" alt="Thumbnail 4" />
+            </button>
+          </div>
+
+          <!-- CANDIDATE NAME & BADGE -->
+          <h2 class="sidebar-candidate-name" id="sidebar-name">
+            Direct Test User
+          </h2>
+          <span
+            id="sidebar-gender-badge"
+            class="badge-groom"
+            style="
+              display: inline-block;
+              padding: 4px 14px;
+              border-radius: 50px;
+              font-size: 0.82rem;
+              font-weight: 800;
+              background: #6a0b14;
+              color: #fff;
+              margin-bottom: 12px;
+            "
+          >
+            GROOM PROFILE
+          </span>
+
+          <!-- QUICK SPECS LIST -->
+          <ul class="sidebar-quick-specs">
+            <li>
+              <span class="spec-label">Age / DOB:</span>
+              <span class="spec-val" id="spec-age">25 Years</span>
+            </li>
+            <li>
+              <span class="spec-label">Marital Status:</span>
+              <span class="spec-val" id="spec-status">Unmarried</span>
+            </li>
+            <li>
+              <span class="spec-label">Height:</span>
+              <span class="spec-val" id="spec-height">5' 6"</span>
+            </li>
+            <li>
+              <span class="spec-label">Complexion:</span>
+              <span class="spec-val" id="spec-complexion">Fair</span>
+            </li>
+            <li>
+              <span class="spec-label">City:</span>
+              <span class="spec-val" id="spec-city">Lucknow</span>
+            </li>
+            <li>
+              <span class="spec-label">Firqa / Maslak:</span>
+              <span class="spec-val" id="spec-sect">Sunni NO BAR</span>
+            </li>
+            <li>
+              <span class="spec-label">Caste:</span>
+              <span class="spec-val" id="spec-caste">Khan / Shaikh</span>
+            </li>
+          </ul>
+          <!-- SIDEBAR ACTIONS: DOWNLOAD PDF, WHATSAPP & INTEREST -->
+          <div
+            class="sidebar-cta-wrap"
+            style="
+              padding: 20px 22px;
+              background: #fdfaf6;
+              border-top: 1px solid #ebdcc9;
+            "
+          >
+            <button
+              type="button"
+              class="btn-action-download-pdf btn-download-pdf-action"
+              onclick="downloadProfilePDF()"
+              id="btn-download-pdf-sidebar"
+              aria-label="Download Official Profile PDF Biodata"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="20"
+                height="20"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Download Profile PDF</span>
+            </button>
+          </div>
+        </aside>
+
+        <!-- ==========================================
+           RIGHT COLUMN: HEADER, HIGHLIGHTS, HADITH & CARDS
+           (MATCHING EXACT USER SCREENSHOT REFERENCE)
+           ========================================== -->
+        <section class="profile-main-content">
+          <!-- TOP ROW: TITLE & DOWNLOAD PDF BUTTON -->
+          <div class="highlights-hero-card">
+            <div class="highlights-headline-row">
+              <div>
+                <h2 class="highlights-title" id="main-degree-title">
+                  Graduate
+                </h2>
+                <p class="profile-sub-meta" id="main-sub-meta">
+                  Business / Service &bull; Lucknow &bull; Sunni NO BAR
+                </p>
+              </div>
+              <div>
+                <button
+                  type="button"
+                  class="btn-action-download-pdf-sm btn-download-pdf-action"
+                  id="btn-download-pdf-top"
+                  onclick="downloadProfilePDF()"
+                  aria-label="Download Official Profile PDF Biodata"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="18"
+                    height="18"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  <span>Download PDF</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 4 HIGHLIGHT CARDS -->
+            <div class="highlights-cards-grid">
+              <div class="highlight-card">
+                <div class="highlight-label">EDUCATION</div>
+                <div class="highlight-val" id="highlight-education">
+                  Graduate
+                </div>
+              </div>
+              <div class="highlight-card">
+                <div class="highlight-label">PROFESSION</div>
+                <div class="highlight-val" id="highlight-profession">
+                  Business / Service
+                </div>
+              </div>
+              <div class="highlight-card">
+                <div class="highlight-label">LOCATION</div>
+                <div class="highlight-val" id="highlight-location">Lucknow</div>
+              </div>
+              <div class="highlight-card">
+                <div class="highlight-label">CASTE</div>
+                <div class="highlight-val" id="highlight-caste">
+                  Khan / Shaikh
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- ISLAMIC HADITH BANNER -->
+          <div class="hadith-quote-banner">
+            <div class="hadith-heart-icon">❤</div>
+            <div>
+              <div class="hadith-arabic">
+                النِّكَاحُ مِنْ سُنَّتِي فَمَنْ لَمْ يَعْمَلْ بِسُنَّتِي
+                فَلَيْسَ مِنِّي
+              </div>
+              <div class="hadith-translation">
+                "Nikah is among my Sunnah; whoever does not follow my Sunnah is
+                not of me." — Sunan Ibn Majah
+              </div>
+            </div>
+          </div>
+
+          <!-- 1. RELIGIOUS & COMMUNITY BACKGROUND -->
+          <article class="biodata-section-card">
+            <div class="biodata-card-header">
+              <div class="biodata-header-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M12 2a10 10 0 1 0 10 10H12V2z"></path>
+                  <path d="M12 2a10 10 0 0 1 10 10"></path>
+                </svg>
+              </div>
+              <h3 class="biodata-card-title">
+                Religious &amp; Community Background
+              </h3>
+            </div>
+            <div class="biodata-card-body">
+              <div class="biodata-table-grid">
+                <div class="bio-item">
+                  <span class="bio-label">Religion</span>
+                  <span class="bio-val" id="bio-religion">Islam</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Firqa / Sect</span>
+                  <span class="bio-val" id="bio-firqa">Sunni</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Maslak / School</span>
+                  <span class="bio-val" id="bio-maslak">NO BAR</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Caste / Biradari</span>
+                  <span class="bio-val" id="bio-caste">Khan / Shaikh</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Marital Status</span>
+                  <span class="bio-val" id="bio-marital">Unmarried</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Mother Tongue</span>
+                  <span class="bio-val">Urdu / Hindi</span>
+                </div>
+              </div>
+            </div>
+          </article>
+          <!-- 2. EDUCATION & PROFESSION -->
+          <article class="biodata-section-card">
+            <div class="biodata-card-header">
+              <div class="biodata-header-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+              </div>
+              <h3 class="biodata-card-title">
+                Personal &amp; Physical Attributes
+              </h3>
+            </div>
+            <div class="biodata-card-body">
+              <div class="biodata-table-grid">
+                <div class="bio-item">
+                  <span class="bio-label">Age / Date of Birth</span>
+                  <span class="bio-val">30</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Height</span>
+                  <span class="bio-val">5.7</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Complexion</span>
+                  <span class="bio-val">Wheatish</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Marital Status</span>
+                  <span class="bio-val">Unmarried</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Physical Disability</span>
+                  <span class="bio-val">None</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Mother Tongue / Language</span>
+                  <span class="bio-val">Urdu / Hindi / English</span>
+                </div>
+              </div>
+            </div>
+          </article>
+          <!-- 3. EDUCATION & PROFESSION -->
+          <article class="biodata-section-card">
+            <div class="biodata-card-header">
+              <div class="biodata-header-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M22 10v6M2 10l10-5 10 5-10 5z"></path>
+                  <path d="M6 12v5c3 3 9 3 12 0v-5"></path>
+                </svg>
+              </div>
+              <h3 class="biodata-card-title">
+                Education &amp; Professional Career
+              </h3>
+            </div>
+            <div class="biodata-card-body">
+              <div class="biodata-table-grid">
+                <div class="bio-item">
+                  <span class="bio-label">Highest Education</span>
+                  <span class="bio-val" id="bio-education">Graduate</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Occupation / Profession</span>
+                  <span class="bio-val" id="bio-work">Business / Service</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Annual Income</span>
+                  <span class="bio-val" id="bio-income"
+                    >Confidential / Disclosed to Family</span
+                  >
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Working City</span>
+                  <span class="bio-val" id="bio-city">Lucknow</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- 3. FAMILY DETAILS -->
+          <article class="biodata-section-card">
+            <div class="biodata-card-header">
+              <div class="biodata-header-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path
+                    d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+                  ></path>
+                  <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                </svg>
+              </div>
+              <h3 class="biodata-card-title">Family Details &amp; Residence</h3>
+            </div>
+            <div class="biodata-card-body">
+              <div class="biodata-table-grid">
+                <div class="bio-item">
+                  <span class="bio-label">Father's Name &amp; Status</span>
+                  <span class="bio-val" id="bio-fname"
+                    >Respected Family Member</span
+                  >
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Mother's Details</span>
+                  <span class="bio-val" id="bio-mname">Homemaker</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Brothers</span>
+                  <span class="bio-val" id="bio-brother">0</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Sisters</span>
+                  <span class="bio-val" id="bio-sister">0</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Accommodation</span>
+                  <span class="bio-val" id="bio-accommodation">Own House</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Residential City</span>
+                  <span class="bio-val" id="bio-full-city"
+                    >Lucknow, Uttar Pradesh</span
+                  >
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- 4. PARTNER PREFERENCES -->
+          <article class="biodata-section-card">
+            <div class="biodata-card-header">
+              <div class="biodata-header-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="9" cy="7" r="4"></circle>
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                </svg>
+              </div>
+              <h3 class="biodata-card-title">
+                Partner Preferences &amp; Expectations
+              </h3>
+            </div>
+            <div class="biodata-card-body">
+              <div class="biodata-table-grid">
+                <div class="bio-item">
+                  <span class="bio-label">Preferred Location</span>
+                  <span class="bio-val" id="bio-preferred-loc"
+                    >Lucknow &amp; Nearby / All India</span
+                  >
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Preferred Firqa</span>
+                  <span class="bio-val" id="bio-preferred-firqa"
+                    >Sunni / Compatible Family</span
+                  >
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Marital Status Preference</span>
+                  <span class="bio-val">Unmarried / Never Married</span>
+                </div>
+                <div class="bio-item">
+                  <span class="bio-label">Expectations</span>
+                  <span class="bio-val"
+                    >Practicing Muslim family with traditional values</span
+                  >
+                </div>
+              </div>
+            </div>
+          </article>
+        </section>
+      </div>
+    </main>
+
+    <!-- =========================================================
+       DEDICATED PRINTABLE BIODATA FOR PDF EXPORT (PERFECT SINGLE A4 PAGE)
+       ========================================================= -->
+    <div
+      id="alnikah-pdf-printable"
+      style="
+        display: none;
+        position: relative;
+        overflow: hidden;
+        background: #ffffff;
+        color: #221516;
+        font-family: &quot;Plus Jakarta Sans&quot;, Arial, sans-serif;
+        padding: 12px 16px;
+        width: 680px;
+        max-width: 680px;
+        margin: 0 auto;
+        box-sizing: border-box;
+        border: 2.5px solid #b8860b;
+        border-radius: 4px;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      "
+    >
+      <!-- WATERMARK LOGO BACKGROUND -->
+      <div
+        id="pdf-watermark-wrap"
+        style="
+          position: absolute;
+          top: 28%;
+          left: 50%;
+          margin-left: -290px;
+          width: 600px;
+          height: 600px;
+          pointer-events: none;
+          z-index: 0;
+          opacity: 0.07;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        "
+      >
+        <img
+          src="images/logo.webp"
+          alt="Al-Nikah Watermark"
+          style="width: 100%; height: 100%; object-fit: contain; display: block"
+          crossorigin="anonymous"
+        />
+      </div>
+
+      <!-- MAIN CONTENT WRAPPER -->
+      <div style="position: relative; z-index: 1">
+        <!-- PDF HEADER: BISMILLAH & BUREAU LOGO -->
+        <!-- PDF HEADER: BISMILLAH & BUREAU LOGO (EXACT DESIGN MATCH) -->
+        <div
+          style="
+            border-bottom: 2px solid #6a0b14;
+            padding: 6px 0 8px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+          "
+        >
+          <!-- LEFT: LOGO -->
+          <div
+            style="
+              width: 100px;
+              flex-shrink: 0;
+              display: flex;
+              align-items: center;
+              justify-content: flex-start;
+            "
+          >
+            <img
+              src="images/logo.webp"
+              alt="Al-Nikah Logo"
+              style="
+                width: 92px;
+                height: 92px;
+                object-fit: contain;
+                display: block;
+              "
+              crossorigin="anonymous"
+            />
+          </div>
+
+          <!-- CENTER: BUREAU NAME & SLOGAN -->
+          <div style="flex: 1; text-align: center; padding: 0 4px">
+            <h1
+              style="
+                font-size: 1.35rem;
+                font-weight: 800;
+                color: #6a0b14;
+                margin: 0;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                line-height: 1.15;
+              "
+            >
+              AL NIKAH MARRIAGE
+            </h1>
+            <div
+              style="
+                font-size: 1.25rem;
+                font-weight: 800;
+                color: #6a0b14;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                line-height: 1.15;
+                margin-top: 2px;
+              "
+            >
+              BUREAU &amp; CONSULTANCY
+            </div>
+            <div
+              style="
+                font-family:
+                  &quot;Caveat&quot;, &quot;Segoe Print&quot;, cursive,
+                  sans-serif;
+                font-size: 0.98rem;
+                color: #1e5a96;
+                font-weight: 700;
+                margin-top: 2px;
+                letter-spacing: 0.02em;
+              "
+            >
+              Brining Soulmates Together
+            </div>
+          </div>
+
+          <!-- RIGHT: CONTACT & WEBSITE INFO -->
+          <div
+            style="
+              text-align: right;
+              white-space: nowrap;
+              font-size: 0.70rem;
+              color: #1a4a84;
+              font-weight: 700;
+              line-height: 1.45;
+              flex-shrink: 0;
+            "
+          >
+            <div>www.alnikahmarriage.com</div>
+            <div style="margin-top: 1px">E-mail: alnikahxlko@gmail.com</div>
+            <div style="margin-top: 1px">Contact: 0522-4045930</div>
+            <div style="margin-top: 1px; color: #1e7e34;">WhatsApp: +91 8601768924</div>
+          </div>
+        </div>
+
+        <!-- PROFILE BASIC BANNER ROW -->
+        <div
+          style="
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            background: #fdfaf6;
+            border: 1px solid #ebdcc9;
+            border-radius: 6px;
+            padding: 7px 12px;
+            margin-bottom: 7px;
+          "
+        >
+          <div
+            style="
+              width: 70px;
+              height: 70px;
+              border-radius: 50%;
+              border: 2.5px solid #c5a059;
+              overflow: hidden;
+              flex-shrink: 0;
+              box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+            "
+          >
+            <img
+              id="pdf-photo"
+              src="images/groom-1.webp"
+              alt="Candidate Photo"
+              style="
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                display: block;
+              "
+              crossorigin="anonymous"
+              onerror="
+                this.onerror = null;
+                this.src = 'images/groom-1.webp';
+              "
+            />
+          </div>
+          <div style="flex: 1">
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+              "
+            >
+              <h2
+                id="pdf-name"
+                style="
+                  font-size: 1.12rem;
+                  font-weight: 800;
+                  color: #520103;
+                  margin: 0;
+                "
+              >
+                Candidate Name
+              </h2>
+            </div>
+            <div
+              id="pdf-highlights-line"
+              style="
+                font-size: 0.71rem;
+                color: #6a0b14;
+                font-weight: 700;
+                margin-top: 1px;
+              "
+            >
+              —
+            </div>
+            <div
+              style="
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 4px;
+                margin-top: 4px;
+                font-size: 0.73rem;
+              "
+            >
+              <div>
+                <span
+                  style="
+                    color: #796860;
+                    font-size: 0.63rem;
+                    display: block;
+                    font-weight: 600;
+                  "
+                  >AGE / DOB</span
+                ><strong id="pdf-dob">—</strong>
+              </div>
+              <div>
+                <span
+                  style="
+                    color: #796860;
+                    font-size: 0.63rem;
+                    display: block;
+                    font-weight: 600;
+                  "
+                  >HEIGHT</span
+                ><strong id="pdf-height">—</strong>
+              </div>
+              <div>
+                <span
+                  style="
+                    color: #796860;
+                    font-size: 0.63rem;
+                    display: block;
+                    font-weight: 600;
+                  "
+                  >STATUS</span
+                ><strong id="pdf-marital-status">—</strong>
+              </div>
+              <div>
+                <span
+                  style="
+                    color: #796860;
+                    font-size: 0.63rem;
+                    display: block;
+                    font-weight: 600;
+                  "
+                  >CITY</span
+                ><strong id="pdf-city">—</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SECTION 1: RELIGIOUS & COMMUNITY BACKGROUND -->
+        <div style="margin-bottom: 12px; padding-bottom: 4px">
+          <div
+            style="
+              background: #6a0b14;
+              color: #ffffff;
+              text-align: left;
+              padding: 0px 0px 8px 5px;
+              font-size: 0.72rem;
+              font-weight: 800;
+              line-height: 1.4;
+              text-transform: uppercase;
+              letter-spacing: 0.03em;
+              border-radius: 3px;
+              box-sizing: border-box;
+            "
+          >
+            1. Religious &amp; Community Background
+          </div>
+          <table
+            style="
+              width: 100%;
+              table-layout: fixed;
+              border-collapse: collapse;
+              margin-top: 2px;
+              font-size: 0.73rem;
+            "
+          >
+            <colgroup>
+              <col style="width: 20%" />
+              <col style="width: 30%" />
+              <col style="width: 20%" />
+              <col style="width: 30%" />
+            </colgroup>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Religion:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Islam
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Firqa / Sect:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-firqa"
+              >
+                Sunni
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Maslak:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-maslak"
+              >
+                NO BAR
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Caste:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-caste"
+              >
+                Khan / Shaikh
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Religious Values:
+              </td>
+              <td
+                colspan="3"
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-religious-values"
+              >
+                Practicing Muslim, Observes Halal Ethics &amp; Islamic Family
+                Harmony
+              </td>
+            </tr>
+          </table>
+        </div>
+
+        <!-- SECTION 2: PHYSICAL & PERSONAL DETAILS -->
+        <div style="margin-bottom: 12px; padding-bottom: 4px">
+          <div
+            style="
+              background: #6a0b14;
+              color: #ffffff;
+              text-align: left;
+              padding: 0px 0px 8px 5px;
+              font-size: 0.72rem;
+              font-weight: 800;
+              line-height: 1.35;
+              text-transform: uppercase;
+              letter-spacing: 0.03em;
+              border-radius: 3px;
+              box-sizing: border-box;
+            "
+          >
+            2. Personal &amp; Physical Details
+          </div>
+          <table
+            style="
+              width: 100%;
+              table-layout: fixed;
+              border-collapse: collapse;
+              margin-top: 2px;
+              font-size: 0.73rem;
+            "
+          >
+            <colgroup>
+              <col style="width: 20%" />
+              <col style="width: 30%" />
+              <col style="width: 20%" />
+              <col style="width: 30%" />
+            </colgroup>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Age / DOB:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-dob-2"
+              >
+                25 Years
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Height:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-height-2"
+              >
+                5' 6"
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Complexion:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-complexion"
+              >
+                Fair
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Marital Status:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-marital-status-2"
+              >
+                Unmarried
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Disability:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-disability"
+              >
+                None
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Mother Tongue:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-mother-tongue"
+              >
+                Urdu / Hindi / English
+              </td>
+            </tr>
+          </table>
+        </div>
+
+        <!-- SECTION 3: EDUCATION & OCCUPATION -->
+        <div style="margin-bottom: 12px; padding-bottom: 4px">
+          <div
+            style="
+              background: #6a0b14;
+              color: #ffffff;
+              text-align: left;
+              padding: 0px 0px 8px 5px;
+              font-size: 0.72rem;
+              font-weight: 800;
+              line-height: 1.35;
+              text-transform: uppercase;
+              letter-spacing: 0.03em;
+              border-radius: 3px;
+              box-sizing: border-box;
+            "
+          >
+            3. Education &amp; Career Details
+          </div>
+          <table
+            style="
+              width: 100%;
+              table-layout: fixed;
+              border-collapse: collapse;
+              margin-top: 2px;
+              font-size: 0.73rem;
+            "
+          >
+            <colgroup>
+              <col style="width: 20%" />
+              <col style="width: 30%" />
+              <col style="width: 20%" />
+              <col style="width: 30%" />
+            </colgroup>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Highest Education:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-education"
+              >
+                Graduate
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Profession:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-profession"
+              >
+                Business / Service
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Annual Income:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-income"
+              >
+                10 - 12 Lakhs / Annum
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Work City:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-work-city"
+              >
+                Lucknow
+              </td>
+            </tr>
+          </table>
+        </div>
+
+        <!-- SECTION 4: FAMILY BACKGROUND & RESIDENCE -->
+        <div style="margin-bottom: 12px; padding-bottom: 4px">
+          <div
+            style="
+              background: #6a0b14;
+              color: #ffffff;
+              text-align: left;
+              padding: 0px 0px 8px 5px;
+              font-size: 0.72rem;
+              font-weight: 800;
+              line-height: 1.35;
+              text-transform: uppercase;
+              letter-spacing: 0.03em;
+              border-radius: 3px;
+              box-sizing: border-box;
+            "
+          >
+            4. Family Details &amp; Residence
+          </div>
+          <table
+            style="
+              width: 100%;
+              table-layout: fixed;
+              border-collapse: collapse;
+              margin-top: 2px;
+              font-size: 0.73rem;
+            "
+          >
+            <colgroup>
+              <col style="width: 20%" />
+              <col style="width: 30%" />
+              <col style="width: 20%" />
+              <col style="width: 30%" />
+            </colgroup>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Father's Details:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-fname"
+              >
+                —
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Mother's Details:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-mname"
+              >
+                —
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Brothers:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-brother"
+              >
+                0
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Sisters:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-sister"
+              >
+                0
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Accommodation:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-accommodation"
+              >
+                Own House
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Residential City:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-full-city"
+              >
+                Lucknow, Uttar Pradesh
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Contact Number:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6a0b14;
+                  font-weight: 800;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-contact"
+              >
+                —
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Alternate Contact:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-alt-contact"
+              >
+                —
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Residential Address:
+              </td>
+              <td
+                colspan="3"
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-address"
+              >
+                —
+              </td>
+            </tr>
+          </table>
+        </div>
+
+        <!-- SECTION 5: PARTNER PREFERENCES -->
+        <div style="margin-bottom: 12px; padding-bottom: 4px">
+          <div
+            style="
+              background: #6a0b14;
+              color: #ffffff;
+              text-align: left;
+              padding: 0px 0px 8px 5px;
+              font-size: 0.72rem;
+              font-weight: 800;
+              line-height: 1.35;
+              text-transform: uppercase;
+              letter-spacing: 0.03em;
+              border-radius: 3px;
+              box-sizing: border-box;
+            "
+          >
+            5. Partner Preferences &amp; Expectations
+          </div>
+          <table
+            style="
+              width: 100%;
+              table-layout: fixed;
+              border-collapse: collapse;
+              margin-top: 2px;
+              font-size: 0.73rem;
+            "
+          >
+            <colgroup>
+              <col style="width: 20%" />
+              <col style="width: 30%" />
+              <col style="width: 20%" />
+              <col style="width: 30%" />
+            </colgroup>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Preferred Sect:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-pref-firqa"
+              >
+                Sunni / Compatible Family
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Preferred City:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-pref-city"
+              >
+                Lucknow &amp; Nearby
+              </td>
+            </tr>
+            <tr>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Marital Preference:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-pref-status"
+              >
+                Unmarried / Never Married
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #6b5c56;
+                  font-weight: 600;
+                  border-bottom: 1px solid #ede1d3;
+                "
+              >
+                Expectations:
+              </td>
+              <td
+                style="
+                  padding: 4px 6px;
+                  vertical-align: middle;
+                  color: #221516;
+                  font-weight: 700;
+                  border-bottom: 1px solid #ede1d3;
+                "
+                id="pdf-pref-expectations"
+              >
+                Educated, practicing Muslim family
+              </td>
+            </tr>
+          </table>
+        </div>
+
+        <!-- PDF FOOTER: OFFICIAL BUREAU AUTHENTICATION -->
+        <div
+          class="pdf-footer"
+          style="
+            border-top: 1.5px solid #6a0b14;
+            padding-top: 5px;
+            margin-top: 6px;
+            font-size: 0.63rem;
+            color: #66554f;
+            line-height: 1.35;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          "
+        >
+          <div>
+            <p style="margin: 0; font-weight: 800; color: #6a0b14">
+              Al-Nikah Muslim Matrimonial Services &amp; Consultancy
+            </p>
+            <p style="margin: 1px 0 0">
+              132/2A New Friends Colony, Jankipuram Ext, Lucknow • Helpline:
+              0522-4045930 • WhatsApp: +91 8601768924
+            </p>
+            <p style="margin: 1px 0 0">
+              Website: www.alnikahmarriage.com • Email: alnikahxlko@gmail.com
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- CALL TO ACTION SECTION -->
+    <section class="cta-section" id="cta-block" aria-label="Call to Action">
+      <div class="container">
+        <div class="cta-banner-row">
+          <h2 class="cta-headline">Find Your Blessed Islamic Match Today</h2>
+          <a href="signup.html" class="btn btn-outline btn-lg cta-banner-btn"
+            >Register Your Profile</a
+          >
+        </div>
+      </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="site-footer" id="site-footer">
+      <div class="container footer-content-wrap">
+        <div class="footer-grid">
+          <div class="footer-col about-col">
+            <h3 class="footer-col-title">About Us</h3>
+            <p class="footer-about-desc">
+              BRINGING SOUL MATE TOGETHER, A marriage bureau is a matchmaking
+              service where candidates interested in marriage register their
+              names and the bureau suggests to them suitable matches from their
+              database.
+            </p>
+          </div>
+          <div class="footer-col services-col">
+            <h3 class="footer-col-title">Services</h3>
+            <ul class="footer-links-list">
+              <li><a href="services.html">Nikah Services</a></li>
+              <li><a href="services.html">Consultancy &amp; Counselling</a></li>
+              <li><a href="services.html">Hidden Nikah Services</a></li>
+              <li><a href="services.html">Talaq Services</a></li>
+              <li><a href="services.html">Khula Services</a></li>
+            </ul>
+          </div>
+          <div class="footer-col links-col">
+            <h3 class="footer-col-title">Quick Links</h3>
+            <ul class="footer-links-list">
+              <li><a href="about-us.html">About</a></li>
+              <li><a href="index.html#section-brides">Bride &amp; Groom</a></li>
+              <li><a href="success-stories.html">Success Story</a></li>
+              <li>
+                <a href="terms-and-conditions.html">Terms &amp; Condition</a>
+              </li>
+              <li><a href="contact-us.html">Contact</a></li>
+            </ul>
+          </div>
+          <div class="footer-col contact-col">
+            <h3 class="footer-col-title">Contact Info</h3>
+            <div class="footer-contact-block-wrap">
+              <div class="footer-contact-group">
+                <span class="contact-group-label">Phone Number :-</span>
+                <a href="tel:05224045930" class="contact-group-link"
+                  >0522-4045930</a
+                >
+              </div>
+              <div class="footer-contact-group">
+                <span class="contact-group-label">Email Address :-</span>
+                <a
+                  href="mailto:alnikahxlko@gmail.com"
+                  class="contact-group-link"
+                  >alnikahxlko@gmail.com</a
+                >
+              </div>
+              <div class="footer-contact-group">
+                <span class="contact-group-label">Address :-</span>
+                <span class="contact-group-text"
+                  >132/2A New Friends Colony, Jankipuram Ext, Lucknow</span
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="footer-bottom-bar">
+        <div class="container footer-bottom-inner">
+          <p>&copy; 2026 Al Nikah Marriage Bureau. All Rights Reserved.</p>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="script.js"></script>
+    <script src="api.js"></script>
+    <script>
+      let currentProfile = null;
+      let galleryImages = [];
+      let currentImageIndex = 0;
+
+      // Photo Slider Controls
+      function updateSliderImage(index) {
+        if (!galleryImages || galleryImages.length === 0) return;
+        if (index < 0) index = galleryImages.length - 1;
+        if (index >= galleryImages.length) index = 0;
+        currentImageIndex = index;
+
+        const mainImg = document.getElementById("slider-main-img");
+        const counterBadge = document.getElementById("slider-counter");
+
+        mainImg.style.opacity = "0.4";
+        setTimeout(() => {
+          mainImg.src = AlNikahAPI.resolveImageUrl(
+            galleryImages[currentImageIndex],
+          );
+          mainImg.style.opacity = "1";
+        }, 120);
+
+        counterBadge.textContent = `${currentImageIndex + 1}/${galleryImages.length}`;
+
+        // Update thumbnail active states
+        const thumbBtns = document.querySelectorAll(".profile-thumb-btn");
+        thumbBtns.forEach((btn, idx) => {
+          if (idx === currentImageIndex) {
+            btn.classList.add("active");
+          } else {
+            btn.classList.remove("active");
+          }
+        });
+      }
+
+      function setupGallery(images) {
+        galleryImages =
+          images && images.length > 0 ? images : ["images/groom-1.webp"];
+        currentImageIndex = 0;
+
+        // Populate Thumbnails
+        const thumbContainer = document.getElementById("thumbnails-row");
+        thumbContainer.innerHTML = "";
+
+        galleryImages.forEach((imgSrc, idx) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = `profile-thumb-btn ${idx === 0 ? "active" : ""}`;
+          btn.dataset.index = idx;
+          btn.innerHTML = `<img src="${AlNikahAPI.resolveImageUrl(imgSrc)}" alt="Thumbnail ${idx + 1}">`;
+          btn.onclick = () => updateSliderImage(idx);
+          thumbContainer.appendChild(btn);
+        });
+
+        updateSliderImage(0);
+
+        // Prev / Next button listeners
+        document.getElementById("slider-prev-btn").onclick = () =>
+          updateSliderImage(currentImageIndex - 1);
+        document.getElementById("slider-next-btn").onclick = () =>
+          updateSliderImage(currentImageIndex + 1);
+      }
+
+      // Populate profile data onto UI
+      function renderProfile(profile) {
+        currentProfile = profile;
+        document.getElementById("page-title").textContent =
+          `${profile.name} (${profile.profile_id}) | Al-Nikah Matrimonial`;
+        document.getElementById("hero-profile-id").textContent =
+          `Profile ${profile.profile_id}`;
+        document.getElementById("hero-h1").textContent =
+          `${profile.gender} Profile: ${profile.name}`;
+
+        // Sidebar
+        document.getElementById("sidebar-name").textContent = profile.name;
+        const genderBadge = document.getElementById("sidebar-gender-badge");
+        genderBadge.textContent = `${profile.gender.toUpperCase()} PROFILE`;
+        genderBadge.className =
+          profile.user_type === "BRIDE" ? "badge-bride" : "badge-groom";
+
+        document.getElementById("spec-age").textContent =
+          profile.age_dob || "26 Years";
+        document.getElementById("spec-status").textContent =
+          profile.status || "Unmarried";
+        document.getElementById("spec-height").textContent =
+          profile.height || "5' 6\"";
+        document.getElementById("spec-complexion").textContent =
+          profile.complexion || "Fair";
+        document.getElementById("spec-city").textContent =
+          profile.city || "Lucknow";
+        document.getElementById("spec-sect").textContent =
+          `${profile.firqa} ${profile.maslak || ""}`.trim();
+        document.getElementById("spec-caste").textContent =
+          profile.caste || "Khan / Shaikh";
+
+        // Right column
+        document.getElementById("main-degree-title").textContent =
+          profile.education || "Graduate";
+        document.getElementById("main-sub-meta").textContent =
+          `${profile.profession} • ${profile.city} • ${profile.firqa} ${profile.maslak || ""}`.trim();
+
+        document.getElementById("highlight-education").textContent =
+          profile.education || "Graduate";
+        document.getElementById("highlight-profession").textContent =
+          profile.profession || "Business / Service";
+        document.getElementById("highlight-location").textContent =
+          profile.city || "Lucknow";
+        document.getElementById("highlight-caste").textContent =
+          profile.caste || "Khan / Shaikh";
+
+        // Biodata cards
+        document.getElementById("bio-religion").textContent =
+          profile.religion || "Islam";
+        document.getElementById("bio-firqa").textContent =
+          profile.firqa || "Sunni";
+        document.getElementById("bio-maslak").textContent =
+          profile.maslak || "NO BAR";
+        document.getElementById("bio-caste").textContent =
+          profile.caste || "Khan / Shaikh";
+        document.getElementById("bio-marital").textContent =
+          profile.status || "Unmarried";
+
+        document.getElementById("bio-education").textContent =
+          profile.education || "Graduate";
+        document.getElementById("bio-work").textContent =
+          profile.profession || "Business / Service";
+        document.getElementById("bio-income").textContent =
+          profile.income || "Confidential";
+        document.getElementById("bio-city").textContent =
+          profile.city || "Lucknow";
+
+        document.getElementById("bio-fname").textContent =
+          profile.father_name || "Respected Family Member";
+        document.getElementById("bio-mname").textContent =
+          profile.mother_name || "Homemaker";
+        document.getElementById("bio-brother").textContent =
+          profile.brothers || "0";
+        document.getElementById("bio-sister").textContent =
+          profile.sisters || "0";
+        document.getElementById("bio-accommodation").textContent =
+          profile.accommodation || "Own House";
+        document.getElementById("bio-full-city").textContent =
+          profile.full_city || profile.city || "Lucknow";
+
+        document.getElementById("bio-preferred-loc").textContent =
+          profile.prefered_location || "Lucknow & Nearby";
+        document.getElementById("bio-preferred-firqa").textContent =
+          `${profile.firqa} / Compatible Family`;
+
+        // Setup images gallery (1/5 slider)
+        const imagesList =
+          profile.images && profile.images.length > 0
+            ? profile.images
+            : [profile.image || "images/groom-1.webp"];
+        setupGallery(imagesList);
+
+        function setSafeText(id, val, fallback) {
+          const el = document.getElementById(id);
+          if (el) {
+            el.textContent =
+              val !== undefined && val !== null && String(val).trim() !== ""
+                ? val
+                : fallback || "—";
+          }
+        }
+
+        // Update printable PDF data
+        const pdfPhoto = document.getElementById("pdf-photo");
+        const isGroomProfile = profile.user_type === "GROOM" || profile.gender === "Groom";
+        const fallbackDefaultAvatar = isGroomProfile ? "images/groom-1.webp" : "images/bride-1.webp";
+
+        if (pdfPhoto) {
+          const photoUrl = AlNikahAPI.resolveImageUrl(
+            profile.image || imagesList[0],
+            fallbackDefaultAvatar
+          );
+          
+          // Convert image to base64 so html2canvas never experiences canvas cross-origin taint
+          const preImg = new Image();
+          preImg.crossOrigin = "anonymous";
+          preImg.onload = function () {
+            try {
+              const c = document.createElement("canvas");
+              c.width = preImg.naturalWidth || preImg.width;
+              c.height = preImg.naturalHeight || preImg.height;
+              const ctx = c.getContext("2d");
+              ctx.drawImage(preImg, 0, 0);
+              pdfPhoto.src = c.toDataURL("image/jpeg", 0.95);
+            } catch (e) {
+              pdfPhoto.src = photoUrl;
+            }
+          };
+          preImg.onerror = function () {
+            pdfPhoto.src = photoUrl;
+          };
+          preImg.src = photoUrl;
+        }
+
+        setSafeText("pdf-name", profile.name, "Verified Member");
+        setSafeText("pdf-header-id", `Profile ID: ${profile.profile_id}`);
+
+        const genderText = (profile.gender || (isGroomProfile ? "Groom" : "Bride")).toUpperCase();
+        const pdfBadge = document.getElementById("pdf-gender-badge");
+        if (pdfBadge) {
+          pdfBadge.textContent = `${genderText} PROFILE`;
+          pdfBadge.style.background =
+            profile.user_type === "BRIDE" ? "#fce4ec" : "#eedbc2";
+          pdfBadge.style.color =
+            profile.user_type === "BRIDE" ? "#880e4f" : "#520103";
+        }
+
+        setSafeText(
+          "pdf-highlights-line",
+          `${profile.education || "Graduate"} • ${profile.profession || "Business / Service"} • ${profile.city || "Lucknow"}`,
+        );
+        setSafeText("pdf-dob", profile.age_dob);
+        setSafeText("pdf-dob-2", profile.age_dob);
+        setSafeText("pdf-height", profile.height || "5' 6\"");
+        setSafeText("pdf-height-2", profile.height || "5' 6\"");
+        setSafeText("pdf-complexion", profile.complexion || "Fair");
+        setSafeText("pdf-marital-status", profile.status || "Unmarried");
+        setSafeText("pdf-marital-status-2", profile.status || "Unmarried");
+        setSafeText("pdf-city", profile.city || "Lucknow");
+        setSafeText("pdf-work-city", profile.city || "Lucknow");
+
+        setSafeText("pdf-firqa", profile.firqa || "Sunni");
+        setSafeText("pdf-maslak", profile.maslak || "NO BAR");
+        setSafeText("pdf-caste", profile.caste || "Khan / Shaikh");
+        setSafeText(
+          "pdf-religious-values",
+          "Practicing Muslim, Observes Halal Ethics & Islamic Family Harmony",
+        );
+
+        setSafeText("pdf-disability", profile.disability || "None");
+        setSafeText(
+          "pdf-mother-tongue",
+          profile.mother_tongue || "Urdu / Hindi / English",
+        );
+
+        setSafeText("pdf-education", profile.education || "Graduate");
+        setSafeText(
+          "pdf-profession",
+          profile.profession || "Business / Service",
+        );
+        setSafeText("pdf-income", profile.income || "Confidential / Disclosed to Family");
+
+        setSafeText(
+          "pdf-fname",
+          profile.father_name && profile.father_name !== "Mohd Rashid (Businessman)" ? profile.father_name : "Respected Family Member",
+        );
+        setSafeText(
+          "pdf-mname",
+          profile.mother_name && profile.mother_name !== "Homemaker" ? profile.mother_name : "Homemaker",
+        );
+        setSafeText("pdf-brother", profile.brothers || "0");
+        setSafeText("pdf-sister", profile.sisters || "0");
+        setSafeText("pdf-accommodation", profile.accommodation || "Own House");
+        setSafeText(
+          "pdf-full-city",
+          profile.full_city || profile.city || "Lucknow, Uttar Pradesh",
+        );
+
+        // Candidate Contact & Residential Address
+        const validContact = (profile.contact_number && profile.contact_number !== "No-detail")
+          ? profile.contact_number
+          : ((profile.mobile && profile.mobile !== "No-detail") ? profile.mobile : "Disclosed to Verified Families");
+        setSafeText("pdf-contact", validContact);
+
+        const validAltContact = (profile.alternate_mobile && profile.alternate_mobile !== "No-detail")
+          ? profile.alternate_mobile
+          : "Available on request";
+        setSafeText("pdf-alt-contact", validAltContact);
+
+        const validAddress = (profile.address && profile.address !== "No-detail")
+          ? profile.address
+          : ((profile.n_address && profile.n_address !== "No-detail") ? profile.n_address : (profile.full_city || "Lucknow, Uttar Pradesh"));
+        setSafeText("pdf-address", validAddress);
+
+        setSafeText(
+          "pdf-pref-firqa",
+          `${profile.firqa || "Sunni"} / Compatible Family`,
+        );
+        setSafeText(
+          "pdf-pref-city",
+          profile.prefered_location || "Lucknow & Nearby",
+        );
+        setSafeText(
+          "pdf-pref-status",
+          profile.status === "Never Married"
+            ? "Unmarried / Never Married"
+            : profile.status || "Open / Compatible",
+        );
+        setSafeText(
+          "pdf-pref-expectations",
+          "Educated, practicing Muslim family",
+        );
+      }
+
+      // Single Page A4 PDF Export using html2canvas & jsPDF
+      async function downloadProfilePDF() {
+        const downloadBtns = document.querySelectorAll(
+          ".btn-download-pdf-action",
+        );
+        const origContents = [];
+        downloadBtns.forEach((btn, idx) => {
+          origContents[idx] = btn.innerHTML;
+          btn.innerHTML =
+            '<svg style="animation: spin 1s linear infinite;" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path></svg> <span>Generating A4 PDF...</span>';
+          btn.disabled = true;
+        });
+
+        const printable = document.getElementById("alnikah-pdf-printable");
+        if (!printable) {
+          window.print();
+          downloadBtns.forEach((btn, idx) => {
+            btn.innerHTML = origContents[idx];
+            btn.disabled = false;
+          });
+          return;
+        }
+
+        const profileId =
+          currentProfile && currentProfile.profile_id
+            ? currentProfile.profile_id
+            : "ALN1209";
+        const candidateName =
+          currentProfile && currentProfile.name
+            ? currentProfile.name.trim().replace(/[^a-zA-Z0-9_-]/g, "_")
+            : "Candidate";
+        const filename = `AlNikah_Biodata_${profileId}_${candidateName}.pdf`;
+
+        let wrapper = null;
+
+        try {
+          // Off-screen rendering wrapper (fully opaque, offscreen so html2canvas renders perfectly)
+          wrapper = document.createElement("div");
+          wrapper.style.position = "fixed";
+          wrapper.style.left = "-9999px";
+          wrapper.style.top = "0";
+          wrapper.style.width = "680px";
+          wrapper.style.zIndex = "-9999";
+          wrapper.style.opacity = "1";
+          wrapper.style.background = "#ffffff";
+
+          const clone = printable.cloneNode(true);
+          clone.style.display = "block";
+          clone.style.width = "680px";
+          clone.style.maxWidth = "680px";
+          clone.style.margin = "0";
+          wrapper.appendChild(clone);
+          document.body.appendChild(wrapper);
+
+          // Allow DOM to settle and images to load
+          // Allow DOM to settle and all images (photo, header logo, watermark) to load
+          const allImages = clone.querySelectorAll("img");
+          const imagePromises = Array.from(allImages).map((img) => {
+            return new Promise((resolve) => {
+              if (img.complete && img.naturalWidth !== 0) {
+                resolve();
+              } else {
+                img.onload = resolve;
+                img.onerror = () => {
+                  if (img.id === "pdf-photo") img.src = "images/groom-1.webp";
+                  resolve();
+                };
+                setTimeout(resolve, 350);
+              }
+            });
+          });
+
+          await Promise.all(imagePromises);
+
+          // Small pause for complete font & layout rendering
+          await new Promise((r) => setTimeout(r, 120));
+
+          const canvas = await html2canvas(clone, {
+            scale: 2,
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: "#ffffff",
+            logging: false,
+          });
+
+          let imgData = null;
+          try {
+            imgData = canvas.toDataURL("image/jpeg", 0.98);
+          } catch (taintErr) {
+            console.warn("Retrying canvas export with fallback:", taintErr);
+            const fallbackCanvas = document.createElement("canvas");
+            fallbackCanvas.width = canvas.width;
+            fallbackCanvas.height = canvas.height;
+            const ctx = fallbackCanvas.getContext("2d");
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, fallbackCanvas.width, fallbackCanvas.height);
+            ctx.drawImage(canvas, 0, 0);
+            imgData = fallbackCanvas.toDataURL("image/jpeg", 0.95);
+          }
+
+          const jsPDFConstructor =
+            window.jspdf && window.jspdf.jsPDF
+              ? window.jspdf.jsPDF
+              : typeof jsPDF !== "undefined"
+                ? jsPDF
+                : null;
+
+          if (jsPDFConstructor && imgData) {
+            const pdf = new jsPDFConstructor("p", "mm", "a4");
+            const pageWidth = pdf.internal.pageSize.getWidth(); // 210mm
+            const pageHeight = pdf.internal.pageSize.getHeight(); // 297mm
+            const margin = 6; // 6mm margin
+            const maxW = pageWidth - margin * 2; // 198mm
+            const maxH = pageHeight - margin * 2; // 285mm
+
+            let imgW = maxW;
+            let imgH = (canvas.height * maxW) / canvas.width;
+
+            // Scale down proportionally if height exceeds printable page height
+            if (imgH > maxH) {
+              imgH = maxH;
+              imgW = (canvas.width * maxH) / canvas.height;
+            }
+
+            const x = (pageWidth - imgW) / 2;
+            const y = margin + Math.max(0, (maxH - imgH) / 2);
+
+            pdf.addImage(imgData, "JPEG", x, y, imgW, imgH);
+            pdf.save(filename);
+
+            if (window.AlNikahAPI && AlNikahAPI.showToast) {
+              AlNikahAPI.showToast(
+                "Al-Nikah Profile Biodata PDF downloaded successfully!",
+                "success",
+              );
+            }
+          } else {
+            window.print();
+          }
+        } catch (err) {
+          console.error("PDF export error:", err);
+          if (window.AlNikahAPI && AlNikahAPI.showToast) {
+            AlNikahAPI.showToast(
+              "Preparing print view for PDF export...",
+              "info",
+            );
+          }
+          window.print();
+        } finally {
+          if (wrapper && wrapper.parentNode) {
+            wrapper.parentNode.removeChild(wrapper);
+          }
+          downloadBtns.forEach((btn, idx) => {
+            if (origContents[idx]) {
+              btn.innerHTML = origContents[idx];
+            }
+            btn.disabled = false;
+          });
+        }
+      }
+
+      function sendInterestAlert() {
+        const btn = document.getElementById("btn-send-interest");
+        if (btn) {
+          btn.style.background = "#2e7d32";
+          btn.textContent = "✓ Interest Sent Successfully";
+        }
+        AlNikahAPI.showToast(
+          `Interest sent to ${currentProfile ? currentProfile.name : "candidate"} successfully! Our coordinator will contact both families.`,
+          "success",
+        );
+      }
+
+      // Auto-fetch profile on page load
+      document.addEventListener("DOMContentLoaded", async function () {
+        const params = new URLSearchParams(window.location.search);
+        const profileId = params.get("id") || params.get("profile_id") || "1398";
+
+        try {
+          const res = await AlNikahAPI.getProfile(profileId);
+          if (res.success && res.data) {
+            renderProfile(res.data);
+            return;
+          }
+          // Fallback to latest active profile from database if specified profile not found
+          const latest = await AlNikahAPI.getProfiles({ limit: 1 });
+          if (latest.success && Array.isArray(latest.data) && latest.data.length > 0) {
+            renderProfile(latest.data[0]);
+          }
+        } catch (err) {
+          console.warn("Could not load profile from API:", err);
+          // Try fetching any active profile from database
+          try {
+            const feat = await AlNikahAPI.getFeaturedProfiles();
+            if (feat.data && feat.data.length > 0) {
+              renderProfile(feat.data[0]);
+            }
+          } catch (e) {}
+        }
+      });
+    </script>
+  </body>
+</html>
