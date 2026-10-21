@@ -3,10 +3,11 @@
  * Vanilla JavaScript Integration for pure HTML/CSS/JS Frontend
  */
 const AlNikahAPI = (function () {
-  // Auto-detect API base URL (defaults to Laravel serve port 8000)
+  // Auto-detect API base URL matching browser hostname (localhost or 127.0.0.1)
   const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'file:' || !window.location.hostname;
-  const API_BASE = window.ALNIKAH_API_URL || (isLocalHost ? 'http://127.0.0.1:8000/api' : '/api');
-  const BACKEND_URL = window.ALNIKAH_BACKEND_URL || (isLocalHost ? 'http://127.0.0.1:8000' : '');
+  const currentHost = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? window.location.hostname : '127.0.0.1';
+  const API_BASE = window.ALNIKAH_API_URL || (isLocalHost ? `http://${currentHost}:8000/api` : '/api');
+  const BACKEND_URL = window.ALNIKAH_BACKEND_URL || (isLocalHost ? `http://${currentHost}:8000` : '');
 
   // Safe Image URL helper - converts relative paths from backend to full URL or relative local path
   function resolveImageUrl(path, defaultFallback = 'images/groom-1.webp') {
@@ -543,7 +544,7 @@ const AlNikahAPI = (function () {
         if (meRes.success && meRes.user) {
           currentUser = meRes.user;
           setAuthUser(currentUser);
-        } else {
+        } else if (!currentUser) {
           clearAuthUser();
           window.location.href = 'login.html';
           return;
