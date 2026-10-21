@@ -95,8 +95,8 @@ class ProfileApiController extends Controller
             });
         }
 
-        // Order by latest created or user_id
-        $query->orderBy('user_id', 'desc');
+        // Order by active status first, then latest created
+        $query->orderBy('is_active', 'desc')->orderBy('user_id', 'desc');
 
         $limit = (int) $request->input('limit', 20);
         $limit = ($limit > 100 || $limit < 1) ? 20 : $limit;
@@ -145,6 +145,7 @@ class ProfileApiController extends Controller
             ->where(function ($q) {
                 $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
             })
+            ->orderBy('is_active', 'desc')
             ->orderBy('user_id', 'desc')
             ->take($limitEach)
             ->get();
@@ -153,6 +154,7 @@ class ProfileApiController extends Controller
             ->where(function ($q) {
                 $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
             })
+            ->orderBy('is_active', 'desc')
             ->orderBy('user_id', 'desc')
             ->take($limitEach)
             ->get();
@@ -217,16 +219,31 @@ class ProfileApiController extends Controller
             $profileId = $prefix . (900 + ($user->user_id % 100));
         }
 
+        // Helper to find file in storage/users, public/storage, uploads, or images
+        $checkPhoto = function ($filename) {
+            if (empty($filename)) return null;
+            if (file_exists(public_path('storage/users/' . $filename))) {
+                return asset('storage/users/' . $filename);
+            }
+            if (file_exists(storage_path('app/public/users/' . $filename))) {
+                return asset('storage/users/' . $filename);
+            }
+            if (file_exists(public_path('storage/' . $filename))) {
+                return asset('storage/' . $filename);
+            }
+            if (file_exists(public_path('uploads/' . $filename))) {
+                return asset('uploads/' . $filename);
+            }
+            if (file_exists(public_path('images/' . $filename))) {
+                return asset('images/' . $filename);
+            }
+            return null;
+        };
+
         // Image assignment with graceful fallback
         $imgIndex = ($user->user_id % 4) + 1;
         $defaultImg = $isGroom ? asset("images/groom-{$imgIndex}.webp") : asset("images/bride-{$imgIndex}.webp");
-        $imageUrl = $defaultImg;
-
-        if (!empty($user->profile_pic) && file_exists(public_path('uploads/' . $user->profile_pic))) {
-            $imageUrl = asset('uploads/' . $user->profile_pic);
-        } elseif (!empty($user->profile_pic) && file_exists(public_path('images/' . $user->profile_pic))) {
-            $imageUrl = asset('images/' . $user->profile_pic);
-        }
+        $imageUrl = $checkPhoto($user->profile_pic) ?: $defaultImg;
 
         // Format City
         $city = !empty($user->n_address) ? trim($user->n_address) : (!empty($user->address) ? trim($user->address) : 'Not Specified');
@@ -263,24 +280,14 @@ class ProfileApiController extends Controller
             ->get();
 
         foreach ($dbImages as $row) {
-            $path = null;
-            if (!empty($row->images) && file_exists(public_path('uploads/' . $row->images))) {
-                $path = asset('uploads/' . $row->images);
-            } elseif (!empty($row->images) && file_exists(public_path('images/' . $row->images))) {
-                $path = asset('images/' . $row->images);
-            }
+            $path = $checkPhoto($row->images);
             if ($path && !in_array($path, $allImages)) {
                 $allImages[] = $path;
             }
         }
 
         if (!empty($user->profile_pic1)) {
-            $pic1 = null;
-            if (file_exists(public_path('uploads/' . $user->profile_pic1))) {
-                $pic1 = asset('uploads/' . $user->profile_pic1);
-            } elseif (file_exists(public_path('images/' . $user->profile_pic1))) {
-                $pic1 = asset('images/' . $user->profile_pic1);
-            }
+            $pic1 = $checkPhoto($user->profile_pic1);
             if ($pic1 && !in_array($pic1, $allImages)) {
                 $allImages[] = $pic1;
             }

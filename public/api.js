@@ -484,7 +484,7 @@ const AlNikahAPI = (function () {
       try {
         const brideTrack = document.getElementById('brides-slider-track');
         if (brideTrack) {
-          const res = await AlNikahAPI.getProfiles({ type: 'BRIDE', limit: 8 });
+          const res = await AlNikahAPI.getProfiles({ type: 'BRIDE', limit: 10 });
           if (res.success && Array.isArray(res.data) && res.data.length > 0) {
             brideTrack.innerHTML = res.data.map(p => AlNikahAPI.renderProfileCard(p)).join('');
             document.dispatchEvent(new Event('bridesLoaded'));
@@ -498,7 +498,7 @@ const AlNikahAPI = (function () {
       try {
         const groomTrack = document.getElementById('grooms-slider-track');
         if (groomTrack) {
-          const res = await AlNikahAPI.getProfiles({ type: 'GROOM', limit: 8 });
+          const res = await AlNikahAPI.getProfiles({ type: 'GROOM', limit: 10 });
           if (res.success && Array.isArray(res.data) && res.data.length > 0) {
             groomTrack.innerHTML = res.data.map(p => AlNikahAPI.renderProfileCard(p)).join('');
             document.dispatchEvent(new Event('groomsLoaded'));

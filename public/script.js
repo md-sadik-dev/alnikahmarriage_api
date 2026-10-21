@@ -11,35 +11,41 @@ document.addEventListener('DOMContentLoaded', () => {
   // --------------------------------------------------------------------------
   // 1. RESPONSIVE MOBILE NAVIGATION & ABOUT DROPDOWN
   // --------------------------------------------------------------------------
-  const mobileToggle = document.getElementById('mobile-menu-toggle');
-  const navMenu = document.getElementById('primary-nav-menu');
-  const aboutDropdownItem = document.getElementById('about-dropdown-item');
-  const aboutMenuButton = document.getElementById('about-menu-button');
+  const initNavListeners = () => {
+    const mobileToggle = document.getElementById('mobile-menu-toggle');
+    const navMenu = document.getElementById('primary-nav-menu');
 
-  if (mobileToggle && navMenu) {
-    mobileToggle.addEventListener('click', () => {
-      const isExpanded = mobileToggle.getAttribute('aria-expanded') === 'true';
-      mobileToggle.setAttribute('aria-expanded', String(!isExpanded));
-      navMenu.classList.toggle('is-active');
-    });
-
-    // Close menu when clicking outside or clicking any nav link (except dropdown button)
-    document.addEventListener('click', (e) => {
-      if (!navMenu.contains(e.target) && !mobileToggle.contains(e.target)) {
-        navMenu.classList.remove('is-active');
-        mobileToggle.setAttribute('aria-expanded', 'false');
-      }
-    });
-
-    navMenu.querySelectorAll('.nav-link:not(.dropdown-toggle), .dropdown-link, .btn-nav-quote').forEach((link) => {
-      link.addEventListener('click', () => {
-        navMenu.classList.remove('is-active');
-        mobileToggle.setAttribute('aria-expanded', 'false');
+    if (mobileToggle && navMenu && !mobileToggle.dataset.initialized) {
+      mobileToggle.dataset.initialized = 'true';
+      mobileToggle.addEventListener('click', () => {
+        const isExpanded = mobileToggle.getAttribute('aria-expanded') === 'true';
+        mobileToggle.setAttribute('aria-expanded', String(!isExpanded));
+        navMenu.classList.toggle('is-active');
       });
-    });
-  }
+
+      // Close menu when clicking outside or clicking any nav link (except dropdown button)
+      document.addEventListener('click', (e) => {
+        if (!navMenu.contains(e.target) && !mobileToggle.contains(e.target)) {
+          navMenu.classList.remove('is-active');
+          mobileToggle.setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      navMenu.querySelectorAll('.nav-link:not(.dropdown-toggle), .dropdown-link, .btn-nav-quote').forEach((link) => {
+        link.addEventListener('click', () => {
+          navMenu.classList.remove('is-active');
+          mobileToggle.setAttribute('aria-expanded', 'false');
+        });
+      });
+    }
+  };
+
+  initNavListeners();
+  document.addEventListener('headerLoaded', initNavListeners);
 
   // Functional About Dropdown
+  const aboutDropdownItem = document.getElementById('nav-about-dropdown');
+  const aboutMenuButton = document.getElementById('about-menu-button');
   if (aboutDropdownItem && aboutMenuButton) {
     const toggleDropdown = (open) => {
       const shouldOpen = typeof open === 'boolean' ? open : !aboutDropdownItem.classList.contains('is-open');
@@ -359,6 +365,16 @@ document.addEventListener('DOMContentLoaded', () => {
       updateSlider(currentSlide);
     });
 
+    const refreshCards = () => {
+      setTimeout(() => {
+        renderDots();
+        updateSlider(0);
+      }, 60);
+    };
+
+    document.addEventListener('bridesLoaded', refreshCards);
+    document.addEventListener('groomsLoaded', refreshCards);
+
     renderDots();
     updateSlider(0);
     startAutoPlay();
@@ -521,10 +537,51 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
 
-      // Show Results Demonstration Modal
+      // Show Results Modal with Real Database Candidates
       if (filterResultsModal) {
         filterResultsModal.removeAttribute('hidden');
         document.body.style.overflow = 'hidden';
+
+        const resultsGrid = document.getElementById('filter-real-results-grid');
+        const loadingEl = document.getElementById('filter-results-loading');
+        const modalSummary = document.getElementById('filter-modal-summary');
+
+        if (loadingEl) loadingEl.style.display = 'block';
+        if (resultsGrid) resultsGrid.innerHTML = '';
+
+        if (typeof AlNikahAPI !== 'undefined' && typeof AlNikahAPI.getProfiles === 'function') {
+          const params = {
+            type: lookingFor.toUpperCase(),
+            limit: 6
+          };
+          if (firqa) params.firqa = firqa;
+          if (maslak) params.maslak = maslak;
+          if (caste) params.caste = caste;
+          if (maritalStatus) params.status = maritalStatus;
+
+          AlNikahAPI.getProfiles(params).then(res => {
+            if (loadingEl) loadingEl.style.display = 'none';
+            if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+              if (modalSummary) modalSummary.textContent = `Found ${res.data.length} verified ${lookingFor} candidate(s) from database:`;
+              if (resultsGrid) {
+                resultsGrid.innerHTML = res.data.map(p => AlNikahAPI.renderProfileCard(p)).join('');
+              }
+            } else {
+              // If no strict match, show top verified candidates of that gender
+              AlNikahAPI.getProfiles({ type: lookingFor.toUpperCase(), limit: 4 }).then(fallbackRes => {
+                if (modalSummary) modalSummary.textContent = `No exact match for all specific filters. Showing top verified ${lookingFor} profiles from Lucknow & nearby:`;
+                if (resultsGrid && fallbackRes.success && Array.isArray(fallbackRes.data)) {
+                  resultsGrid.innerHTML = fallbackRes.data.map(p => AlNikahAPI.renderProfileCard(p)).join('');
+                }
+              }).catch(() => {
+                if (resultsGrid) resultsGrid.innerHTML = '<p style="text-align:center; padding:20px; color:#6a0b14;">Could not load candidates at this moment.</p>';
+              });
+            }
+          }).catch(err => {
+            if (loadingEl) loadingEl.style.display = 'none';
+            if (resultsGrid) resultsGrid.innerHTML = '<p style="text-align:center; padding:20px; color:#6a0b14;">Failed to connect to database API.</p>';
+          });
+        }
       }
     });
 
