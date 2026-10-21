@@ -359,5 +359,443 @@ const AlNikahAPI = (function () {
         body: data instanceof FormData ? data : JSON.stringify(data),
       });
     },
+
+    // UI Card Template Renderers
+    renderProfileCard: (p) => {
+      const isGroom = (p.user_type || '').toUpperCase() === 'GROOM' || p.gender === 'Groom';
+      const badgeClass = isGroom ? 'badge-groom' : 'badge-bride';
+      const gender = isGroom ? 'Groom' : 'Bride';
+      const image = resolveImageUrl(p.image, isGroom ? 'images/groom-1.webp' : 'images/bride-1.webp');
+      const fallbackImg = isGroom ? 'images/groom-1.webp' : 'images/bride-1.webp';
+
+      return `
+        <article class="profile-card profile-card-custom" data-gender="${gender}" data-firqa="${p.firqa || ''}" data-maslak="${p.maslak || ''}" data-caste="${p.caste || ''}" data-status="${p.status || ''}" data-city="${p.city || ''}">
+          <span class="corner-bracket corner-tl" aria-hidden="true"></span>
+          <span class="corner-bracket corner-br" aria-hidden="true"></span>
+          <div class="profile-card-top">
+            <a href="profile-detail.html?id=${p.id}" class="profile-avatar-ring" aria-label="View ${gender} Profile ${p.profile_id}">
+              <img src="${image}" alt="${gender} Profile" class="profile-avatar-img" width="130" height="130" loading="lazy" onerror="this.onerror=null; this.src='${fallbackImg}';" />
+            </a>
+            <span class="profile-gender-badge ${badgeClass}">${gender}</span>
+          </div>
+          <div class="profile-card-bottom">
+            <div class="profile-id-strip" style="text-align: center; font-weight: 700; color: #6a0b14; font-size: 0.85rem; padding: 4px 0;">ID: ${p.profile_id}</div>
+            <div class="profile-info-content">
+              <h3 class="profile-edu-title">${p.education || 'Graduate'}</h3>
+              <p class="profile-profession">${p.profession || 'Business / Service'}</p>
+              <ul class="profile-fields-list">
+                <li><span class="p-field-lbl">Age / DOB:</span><span class="p-field-val">${p.age_dob || '25 Years'}</span></li>
+                <li><span class="p-field-lbl">Firqa:</span><span class="p-field-val">${p.firqa || 'Sunni'}</span></li>
+                <li><span class="p-field-lbl">Maslak:</span><span class="p-field-val">${p.maslak || 'NO BAR'}</span></li>
+                <li><span class="p-field-lbl">Caste:</span><span class="p-field-val">${p.caste || 'Khan / Shaikh'}</span></li>
+                <li><span class="p-field-lbl">Status:</span><span class="p-field-val">${p.status || 'Unmarried'}</span></li>
+                <li><span class="p-field-lbl">City:</span><span class="p-field-val">${p.city || 'Lucknow'}</span></li>
+              </ul>
+            </div>
+            <div class="dash-card-actions-row">
+              <button type="button" class="btn-dash-card-interest" onclick="AlNikahAPI.handleSendInterest('${p.id}', '${p.name || p.profile_id}', this)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                </svg>
+                Send Interest
+              </button>
+              <a href="profile-detail.html?id=${p.id}" class="btn btn-card-profile">View Profile</a>
+            </div>
+          </div>
+        </article>
+      `;
+    },
+
+    renderPackageCard: (pkg) => {
+      const hasDiscount = pkg.original_price > pkg.offer_price;
+      const features = Array.isArray(pkg.features) ? pkg.features : [];
+      const isAuth = !!getAuthUser();
+
+      return `
+        <div class="package-card ${pkg.card_class || 'package-card'}" style="min-width: 280px;">
+          <div class="package-ribbon">${pkg.ribbon || 'Membership Plan'}</div>
+          <div class="package-card-header">
+            <h3 class="package-name">${pkg.name}</h3>
+            ${hasDiscount ? `
+            <div class="pkg-old-price-line">
+              <span>Our Price:</span> <del>${pkg.original_price_formatted}</del>
+            </div>` : ''}
+            <div class="package-price-wrap">
+              <span class="pkg-offer-label">Offer Price</span>
+              <span class="package-currency">₹</span>
+              <span class="package-amount">${pkg.offer_price_formatted}</span>
+              <span class="package-period">INR</span>
+            </div>
+            <span class="package-duration">${pkg.duration || '1 MONTH'}</span>
+          </div>
+          <div class="package-card-body">
+            <ul class="package-features-list">
+              ${features.map(f => `
+                <li>
+                  <span class="pkg-check" aria-hidden="true">&#10003;</span>
+                  ${f}
+                </li>
+              `).join('')}
+            </ul>
+          </div>
+          <div class="package-card-footer">
+            <a href="${isAuth ? 'dashboard.html' : 'login.html'}" class="btn btn-burgundy btn-block select-plan-btn">Select Plan</a>
+          </div>
+        </div>
+      `;
+    },
+
+    // Interactive Interest Action Handler
+    handleSendInterest: (profileId, name, btnEl) => {
+      if (!isLoggedIn()) {
+        showToast('Please login to send an express interest.', 'warning');
+        setTimeout(() => {
+          window.location.href = 'login.html';
+        }, 1200);
+        return;
+      }
+      if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.innerHTML = '<span>✓ Interest Sent</span>';
+        btnEl.style.background = '#1e4620';
+        btnEl.style.color = '#ffffff';
+      }
+      showToast(`Alhamdulillah! Express Interest successfully sent to ${name}.`, 'success');
+    },
+
+    // Dynamic Homepage Data Initializer
+    loadHomePageData: async () => {
+      // 1. Load Real Membership Packages
+      try {
+        const pkgTrack = document.getElementById('packages-slider-track');
+        if (pkgTrack) {
+          const res = await AlNikahAPI.getPackages();
+          if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+            pkgTrack.innerHTML = res.data.map(pkg => AlNikahAPI.renderPackageCard(pkg)).join('');
+            document.dispatchEvent(new Event('packagesLoaded'));
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load live packages:', err);
+      }
+
+      // 2. Load Real Bride Profiles
+      try {
+        const brideTrack = document.getElementById('brides-slider-track');
+        if (brideTrack) {
+          const res = await AlNikahAPI.getProfiles({ type: 'BRIDE', limit: 8 });
+          if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+            brideTrack.innerHTML = res.data.map(p => AlNikahAPI.renderProfileCard(p)).join('');
+            document.dispatchEvent(new Event('bridesLoaded'));
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load live bride profiles:', err);
+      }
+
+      // 3. Load Real Groom Profiles
+      try {
+        const groomTrack = document.getElementById('grooms-slider-track');
+        if (groomTrack) {
+          const res = await AlNikahAPI.getProfiles({ type: 'GROOM', limit: 8 });
+          if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+            groomTrack.innerHTML = res.data.map(p => AlNikahAPI.renderProfileCard(p)).join('');
+            document.dispatchEvent(new Event('groomsLoaded'));
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load live groom profiles:', err);
+      }
+
+      // Synchronize carousel controls after dynamic DOM insertion
+      setTimeout(() => {
+        window.dispatchEvent(new Event('resize'));
+      }, 50);
+
+      // 4. Load Active Metadata Options into Quick Search
+      try {
+        const firqaSelect = document.getElementById('search-firqa') || document.querySelector('select[name="firqa"]');
+        const casteSelect = document.getElementById('search-caste') || document.querySelector('select[name="caste"]');
+        if (firqaSelect || casteSelect) {
+          const res = await AlNikahAPI.getMetaOptions();
+          if (res.success && res.data) {
+            if (firqaSelect && Array.isArray(res.data.religions)) {
+              firqaSelect.innerHTML = '<option value="">All Sects / Firqa</option>' +
+                res.data.religions.map(r => `<option value="${r.name}">${r.name}</option>`).join('');
+            }
+            if (casteSelect && Array.isArray(res.data.castes)) {
+              casteSelect.innerHTML = '<option value="">All Castes / Biradari</option>' +
+                res.data.castes.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load meta options:', err);
+      }
+    },
+
+    // Dynamic Member Dashboard Initializer
+    loadDashboardData: async () => {
+      // 1. Check & verify authentication state with backend
+      let currentUser = getAuthUser();
+      try {
+        const meRes = await AlNikahAPI.me();
+        if (meRes.success && meRes.user) {
+          currentUser = meRes.user;
+          setAuthUser(currentUser);
+        } else {
+          clearAuthUser();
+          window.location.href = 'login.html';
+          return;
+        }
+      } catch (e) {
+        if (!currentUser) {
+          clearAuthUser();
+          window.location.href = 'login.html';
+          return;
+        }
+      }
+
+      // 2. Populate Real User Topbar, Avatar & Welcome Banner
+      const userName = currentUser.name || 'Respected Member';
+      const userProfileId = currentUser.profile_id || `ALN-${currentUser.user_id}`;
+      const isGroom = (currentUser.user_type || '').toUpperCase() === 'GROOM';
+      const defaultAvatar = isGroom ? 'images/groom-1.webp' : 'images/bride-1.webp';
+      const userAvatar = resolveImageUrl(currentUser.profile_pic, defaultAvatar);
+
+      // Topbar user summary
+      const topbarNameEl = document.querySelector('.topbar-profile-summary span[style*="font-weight: 700"]');
+      if (topbarNameEl) topbarNameEl.textContent = userName;
+
+      const topbarIdEl = document.querySelector('.topbar-profile-summary span[style*="font-size: 0.78rem"]');
+      if (topbarIdEl) topbarIdEl.textContent = `ID: ${userProfileId}`;
+
+      const topbarAvatarEl = document.querySelector('.topbar-avatar');
+      if (topbarAvatarEl) {
+        topbarAvatarEl.src = userAvatar;
+        topbarAvatarEl.onerror = () => { topbarAvatarEl.src = defaultAvatar; };
+      }
+
+      // Welcome banner
+      const welcomeH1 = document.querySelector('.welcome-text-side h1');
+      if (welcomeH1) welcomeH1.textContent = `Welcome Back, ${userName}`;
+
+      const welcomeSubP = document.querySelector('.welcome-text-side p');
+      const oppositeType = isGroom ? 'BRIDE' : 'GROOM';
+      if (welcomeSubP) {
+        welcomeSubP.textContent = `Your profile is actively matching with verified ${oppositeType === 'GROOM' ? 'Groom' : 'Bride'} candidates in Lucknow & nearby.`;
+      }
+
+      // 3. Populate Recommended Matches (opposite gender)
+      try {
+        const dashSliderTrack = document.getElementById('dash-profiles-track');
+        if (dashSliderTrack) {
+          const res = await AlNikahAPI.getProfiles({ type: oppositeType, limit: 6 });
+          if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+            dashSliderTrack.innerHTML = res.data.map(p => AlNikahAPI.renderProfileCard(p)).join('');
+            if (typeof updateDashSlider === 'function') updateDashSlider(0);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load recommended matches:', err);
+      }
+
+      // 4. Populate All Matches Grid
+      try {
+        const matchesGrid = document.getElementById('matches-profiles-grid') || document.querySelector('.matches-card-grid');
+        if (matchesGrid) {
+          const res = await AlNikahAPI.getProfiles({ type: oppositeType, limit: 12 });
+          if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+            matchesGrid.innerHTML = res.data.map(p => AlNikahAPI.renderProfileCard(p)).join('');
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load verified matches grid:', err);
+      }
+
+      // 5. Populate Real Packages & User Active Plan in Dashboard
+      try {
+        const dashPlansWrap = document.getElementById('tab-plans');
+        const planListContainer = document.getElementById('dash-plans-grid') || (dashPlansWrap ? dashPlansWrap.querySelector('.dash-plans-grid') || dashPlansWrap.querySelector('.packages-grid') : null);
+        if (planListContainer) {
+          const plansRes = await AlNikahAPI.getPackages();
+          if (plansRes.success && Array.isArray(plansRes.data)) {
+            planListContainer.innerHTML = plansRes.data.map(pkg => AlNikahAPI.renderPackageCard(pkg)).join('');
+          }
+        }
+        // Update active plan badge
+        const activePlanBadge = document.getElementById('dash-active-plan-badge');
+        if (activePlanBadge) {
+          activePlanBadge.textContent = `Current: ${currentUser.package || 'FREE REGISTRATION'}`;
+        }
+      } catch (err) {
+        console.warn('Could not load dashboard packages:', err);
+      }
+
+      // 6. Prefill Edit Profile Form with Real Database Values
+      try {
+        const editSection = document.getElementById('tab-profile');
+        if (editSection) {
+          const inputs = editSection.querySelectorAll('input, select, textarea');
+          inputs.forEach(input => {
+            const group = input.closest('.contact-input-group');
+            if (!group) return;
+            const label = (group.querySelector('.contact-input-label')?.textContent || '').toLowerCase();
+
+            if (label.includes('full name') || label.includes('name')) input.value = currentUser.name || '';
+            else if (label.includes('age') || label.includes('dob')) input.value = currentUser.dob || '';
+            else if (label.includes('height')) input.value = currentUser.height || '';
+            else if (label.includes('sect') || label.includes('firqa')) input.value = currentUser.sect || '';
+            else if (label.includes('caste') || label.includes('biradari')) input.value = currentUser.caste || '';
+            else if (label.includes('degree') || label.includes('qualification')) input.value = currentUser.qualification || '';
+            else if (label.includes('profession') || label.includes('work') || label.includes('role')) input.value = currentUser.work || '';
+            else if (label.includes('income')) input.value = currentUser.income || '';
+            else if (label.includes('city') || label.includes('native')) input.value = currentUser.n_address || currentUser.address || '';
+            else if (label.includes('about')) input.value = currentUser.additional_info || '';
+            else if (label.includes('partner') || label.includes('expectation') || label.includes('preferred')) input.value = currentUser.prefered_location || '';
+          });
+
+          // Bind "Update Biodata" button to real API
+          const updateBtn = editSection.querySelector('button[onclick*="Profile changes updated"]');
+          if (updateBtn) {
+            updateBtn.removeAttribute('onclick');
+            updateBtn.onclick = async () => {
+              updateBtn.disabled = true;
+              updateBtn.textContent = 'Saving Changes...';
+
+              const payload = {};
+              inputs.forEach(input => {
+                const group = input.closest('.contact-input-group');
+                if (!group) return;
+                const label = (group.querySelector('.contact-input-label')?.textContent || '').toLowerCase();
+
+                if (label.includes('full name') || label.includes('name')) payload.name = input.value;
+                else if (label.includes('age') || label.includes('dob')) payload.dob = input.value;
+                else if (label.includes('height')) payload.height = input.value;
+                else if (label.includes('sect') || label.includes('firqa')) payload.sect = input.value;
+                else if (label.includes('caste') || label.includes('biradari')) payload.caste = input.value;
+                else if (label.includes('degree') || label.includes('qualification')) payload.qualification = input.value;
+                else if (label.includes('profession') || label.includes('work') || label.includes('role')) payload.work = input.value;
+                else if (label.includes('income')) payload.income = input.value;
+                else if (label.includes('city') || label.includes('native')) payload.n_address = input.value;
+                else if (label.includes('about')) payload.additional_info = input.value;
+                else if (label.includes('partner') || label.includes('expectation') || label.includes('preferred')) payload.prefered_location = input.value;
+              });
+
+              try {
+                const updateRes = await AlNikahAPI.updateProfile(payload);
+                if (updateRes.success) {
+                  showToast('Alhamdulillah! Profile changes saved successfully.', 'success');
+                  if (updateRes.data && updateRes.data.name) {
+                    if (topbarNameEl) topbarNameEl.textContent = updateRes.data.name;
+                    if (welcomeH1) welcomeH1.textContent = `Welcome Back, ${updateRes.data.name}`;
+                  }
+                } else {
+                  showToast(updateRes.message || 'Could not update profile.', 'error');
+                }
+              } catch (e) {
+                showToast(e.message || 'Failed to connect to API.', 'error');
+              } finally {
+                updateBtn.disabled = false;
+                updateBtn.textContent = 'Update Biodata';
+              }
+            };
+          }
+        }
+      } catch (err) {
+        console.warn('Could not wire edit profile form:', err);
+      }
+
+      // 7. Bind Change Password Form to Real API
+      try {
+        const settingsSection = document.getElementById('tab-settings');
+        if (settingsSection) {
+          const passInputs = settingsSection.querySelectorAll('input[type="password"]');
+          const savePassBtn = settingsSection.querySelector('button[onclick*="Password updated"]');
+          if (savePassBtn && passInputs.length >= 2) {
+            savePassBtn.removeAttribute('onclick');
+            savePassBtn.onclick = async () => {
+              const currentPass = passInputs[0].value.trim();
+              const newPass = passInputs[1].value.trim();
+
+              if (!currentPass) {
+                showToast('Please enter your current password.', 'warning');
+                passInputs[0].focus();
+                return;
+              }
+              if (!newPass || newPass.length < 6) {
+                showToast('New password must be at least 6 characters.', 'warning');
+                passInputs[1].focus();
+                return;
+              }
+
+              savePassBtn.disabled = true;
+              savePassBtn.textContent = 'Saving Password...';
+
+              try {
+                const res = await AlNikahAPI.changePassword(currentPass, newPass, newPass);
+                if (res.success) {
+                  showToast('Alhamdulillah! Password changed successfully.', 'success');
+                  passInputs[0].value = '';
+                  passInputs[1].value = '';
+                } else {
+                  showToast(res.message || 'Could not update password.', 'error');
+                }
+              } catch (err) {
+                showToast(err.message || 'Invalid current password.', 'error');
+              } finally {
+                savePassBtn.disabled = false;
+                savePassBtn.textContent = 'Save New Password';
+              }
+            };
+          }
+        }
+      } catch (err) {
+        console.warn('Could not wire password form:', err);
+      }
+    },
+
+    // Dynamic Profile Detail Page Initializer
+    loadProfileDetailPage: async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const profileId = urlParams.get('id') || urlParams.get('profile_id');
+      if (!profileId) return;
+
+      try {
+        const res = await AlNikahAPI.getProfile(profileId);
+        if (res.success && res.data) {
+          const p = res.data;
+          const isGroom = p.user_type === 'GROOM' || p.gender === 'Groom';
+
+          // Update titles & headings
+          document.title = `${p.profile_id} - ${p.gender} Matrimonial Profile | Al-Nikah`;
+          const codeEl = document.querySelector('.detail-profile-code');
+          if (codeEl) codeEl.textContent = `ID: ${p.profile_id}`;
+
+          const nameEl = document.querySelector('.detail-person-name');
+          if (nameEl) nameEl.textContent = p.name || 'Confidential Member';
+
+          const eduTitleEl = document.querySelector('.detail-job-title');
+          if (eduTitleEl) eduTitleEl.textContent = `${p.education} • ${p.profession}`;
+
+          // Update photos if slider exists
+          const mainImg = document.getElementById('detail-main-img');
+          if (mainImg && p.image) {
+            mainImg.src = resolveImageUrl(p.image, isGroom ? 'images/groom-1.webp' : 'images/bride-1.webp');
+          }
+
+          // Express interest button in detail
+          const intBtn = document.querySelector('.btn-detail-interest');
+          if (intBtn) {
+            intBtn.onclick = () => {
+              AlNikahAPI.handleSendInterest(p.id, p.name || p.profile_id, intBtn);
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('Could not load profile detail:', e);
+      }
+    },
   };
 })();
+
