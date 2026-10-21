@@ -95,8 +95,8 @@ class ProfileApiController extends Controller
             });
         }
 
-        // Order by latest created or user_id
-        $query->orderBy('user_id', 'desc');
+        // Order by active status first, then latest created
+        $query->orderBy('is_active', 'desc')->orderBy('user_id', 'desc');
 
         $limit = (int) $request->input('limit', 20);
         $limit = ($limit > 100 || $limit < 1) ? 20 : $limit;
@@ -145,6 +145,7 @@ class ProfileApiController extends Controller
             ->where(function ($q) {
                 $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
             })
+            ->orderBy('is_active', 'desc')
             ->orderBy('user_id', 'desc')
             ->take($limitEach)
             ->get();
@@ -153,6 +154,7 @@ class ProfileApiController extends Controller
             ->where(function ($q) {
                 $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
             })
+            ->orderBy('is_active', 'desc')
             ->orderBy('user_id', 'desc')
             ->take($limitEach)
             ->get();
@@ -213,19 +215,66 @@ class ProfileApiController extends Controller
         // Profile ID formatting
         $profileId = $user->profile_id;
         if (empty($profileId)) {
-            $prefix = $isGroom ? 'PK-GR-' : 'PK-BR-';
-            $profileId = $prefix . (900 + ($user->user_id % 100));
+            $prefix = $isGroom ? 'ALN-G-' : 'ALN-B-';
+            $profileId = $prefix . $user->user_id;
         }
 
-        // Image assignment with graceful fallback
-        $imgIndex = ($user->user_id % 4) + 1;
-        $defaultImg = $isGroom ? asset("images/groom-{$imgIndex}.webp") : asset("images/bride-{$imgIndex}.webp");
-        $imageUrl = $defaultImg;
+        // Helper to find file in storage/users, public/storage, uploads, or images
+        $checkPhoto = function ($filename) {
+            if (empty($filename)) return null;
+            if (file_exists(public_path('storage/users/' . $filename))) {
+                return asset('storage/users/' . $filename);
+            }
+            if (file_exists(storage_path('app/public/users/' . $filename))) {
+                return asset('storage/users/' . $filename);
+            }
+            if (file_exists(public_path('storage/' . $filename))) {
+                return asset('storage/' . $filename);
+            }
+            if (file_exists(public_path('uploads/' . $filename))) {
+                return asset('uploads/' . $filename);
+            }
+            if (file_exists(public_path('images/' . $filename))) {
+                return asset('images/' . $filename);
+            }
+            return null;
+        };
 
-        if (!empty($user->profile_pic) && file_exists(public_path('uploads/' . $user->profile_pic))) {
-            $imageUrl = asset('uploads/' . $user->profile_pic);
-        } elseif (!empty($user->profile_pic) && file_exists(public_path('images/' . $user->profile_pic))) {
-            $imageUrl = asset('images/' . $user->profile_pic);
+        // Helper to locate physical file on server
+        $resolveLocalPhoto = function ($filename) {
+            if (empty($filename)) return null;
+            $candidates = [
+                storage_path('app/public/users/' . $filename),
+                public_path('storage/users/' . $filename),
+                public_path('uploads/' . $filename),
+                public_path('images/' . $filename),
+            ];
+            foreach ($candidates as $cand) {
+                if (file_exists($cand) && is_file($cand)) {
+                    return $cand;
+                }
+            }
+            return null;
+        };
+
+        // Compute dynamic image URLs and Base64 representation for seamless CORS-free PDF export
+        $base64Photo = null;
+        $imageUrl = null;
+        $photoStreamUrl = null;
+
+        if (!empty($user->profile_pic)) {
+            $localPath = $resolveLocalPhoto($user->profile_pic);
+            if ($localPath) {
+                $imageUrl = asset('storage/users/' . $user->profile_pic);
+                $photoStreamUrl = url('/api/photo/' . $user->profile_pic);
+                $mime = @mime_content_type($localPath) ?: 'image/jpeg';
+                $fileBytes = @file_get_contents($localPath);
+                if ($fileBytes) {
+                    $base64Photo = 'data:' . $mime . ';base64,' . base64_encode($fileBytes);
+                }
+            } else {
+                $imageUrl = $checkPhoto($user->profile_pic);
+            }
         }
 
         // Format City
@@ -250,7 +299,7 @@ class ProfileApiController extends Controller
             $maslak = trim($user->religion);
         }
 
-        // Fetch all images for this user
+        // Fetch real uploaded images for this user
         $allImages = [];
         if ($imageUrl) {
             $allImages[] = $imageUrl;
@@ -263,39 +312,16 @@ class ProfileApiController extends Controller
             ->get();
 
         foreach ($dbImages as $row) {
-            $path = null;
-            if (!empty($row->images) && file_exists(public_path('uploads/' . $row->images))) {
-                $path = asset('uploads/' . $row->images);
-            } elseif (!empty($row->images) && file_exists(public_path('images/' . $row->images))) {
-                $path = asset('images/' . $row->images);
-            }
+            $path = $checkPhoto($row->images);
             if ($path && !in_array($path, $allImages)) {
                 $allImages[] = $path;
             }
         }
 
         if (!empty($user->profile_pic1)) {
-            $pic1 = null;
-            if (file_exists(public_path('uploads/' . $user->profile_pic1))) {
-                $pic1 = asset('uploads/' . $user->profile_pic1);
-            } elseif (file_exists(public_path('images/' . $user->profile_pic1))) {
-                $pic1 = asset('images/' . $user->profile_pic1);
-            }
+            $pic1 = $checkPhoto($user->profile_pic1);
             if ($pic1 && !in_array($pic1, $allImages)) {
                 $allImages[] = $pic1;
-            }
-        }
-
-        // If less than 5 photos, add tasteful profile portfolio shots so 1/5 slider is complete
-        if (count($allImages) < 5) {
-            $baseIndex = ($user->user_id % 4) + 1;
-            for ($k = 1; $k <= 4; $k++) {
-                if (count($allImages) >= 5) break;
-                $candIndex = (($baseIndex + $k - 1) % 4) + 1;
-                $sampleImg = $isGroom ? asset("images/groom-{$candIndex}.webp") : asset("images/bride-{$candIndex}.webp");
-                if (!in_array($sampleImg, $allImages)) {
-                    $allImages[] = $sampleImg;
-                }
             }
         }
 
@@ -309,6 +335,8 @@ class ProfileApiController extends Controller
             'badge_class' => $badgeClass,
             'is_verified' => (bool) ($user->is_verified == 1),
             'image' => $imageUrl,
+            'image_base64' => $base64Photo,
+            'photo_stream_url' => $photoStreamUrl,
             'images' => $allImages,
             'images_count' => count($allImages),
             'education' => !empty($user->qualification) ? trim($user->qualification) : 'Graduate',
@@ -320,6 +348,11 @@ class ProfileApiController extends Controller
             'status' => !empty($user->marital_status) ? ucfirst(strtolower(trim($user->marital_status))) : 'Unmarried',
             'city' => $displayCity,
             'full_city' => $city,
+            'contact_number' => !empty(trim($user->mobile ?? '')) ? trim($user->mobile) : (!empty(trim($user->alternate_mobile ?? '')) ? trim($user->alternate_mobile) : ''),
+            'mobile' => !empty(trim($user->mobile ?? '')) ? trim($user->mobile) : '',
+            'alternate_mobile' => !empty(trim($user->alternate_mobile ?? '')) ? trim($user->alternate_mobile) : '',
+            'address' => !empty(trim($user->address ?? '')) ? trim($user->address) : (!empty(trim($user->n_address ?? '')) ? trim($user->n_address) : $city),
+            'n_address' => !empty(trim($user->n_address ?? '')) ? trim($user->n_address) : '',
         ];
 
         if ($detailed) {
@@ -332,7 +365,6 @@ class ProfileApiController extends Controller
             $data['brothers'] = isset($user->brother) && $user->brother !== '' ? trim($user->brother) : '0';
             $data['sisters'] = isset($user->sister) && $user->sister !== '' ? trim($user->sister) : '0';
             $data['prefered_location'] = !empty(trim($user->prefered_location ?? '')) ? trim($user->prefered_location) : 'Lucknow & Nearby / All India';
-            $data['address'] = !empty(trim($user->address ?? '')) ? trim($user->address) : 'Lucknow, Uttar Pradesh';
             $data['disability'] = !empty(trim($user->disability ?? '')) ? trim($user->disability) : 'None';
             $data['package'] = !empty(trim($user->package ?? '')) ? trim($user->package) : 'Silver';
             $data['created_at_formatted'] = $user->created_at ? $user->created_at->format('M Y') : 'Active Member';
@@ -436,6 +468,7 @@ class ProfileApiController extends Controller
             'prefered_location',
             'address',
             'n_address',
+            'mobile',
             'alternate_mobile',
             'additional_info',
         ];
@@ -551,5 +584,158 @@ class ProfileApiController extends Controller
             'message' => 'Password has been updated successfully.',
         ], 200);
     }
+
+    /**
+     * Upload and update profile photo for authenticated member.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function uploadPhoto(Request $request): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->attributes->get('authenticated_member');
+        if (!$user) {
+            $userId = session('user_id');
+            if ($userId) {
+                $user = User::where('user_id', $userId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+            }
+        }
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated. Active member session is required.',
+            ], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'photo' => 'required|image|mimes:jpeg,png,jpg,webp|max:5120',
+        ], [
+            'photo.required' => 'Please select an image file to upload.',
+            'photo.image' => 'The uploaded file must be an image.',
+            'photo.mimes' => 'Photo must be a JPEG, PNG, JPG, or WebP image.',
+            'photo.max' => 'Photo size must not exceed 5MB.',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => $validator->errors()->first(),
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        if ($request->hasFile('photo')) {
+            $file = $request->file('photo');
+            $cleanName = preg_replace('/[^a-zA-Z0-9._-]/', '_', $file->getClientOriginalName());
+            $filename = time() . '-profile_pic-' . $cleanName;
+
+            $destDir = storage_path('app/public/users');
+            if (!file_exists($destDir)) {
+                mkdir($destDir, 0777, true);
+            }
+            $file->move($destDir, $filename);
+
+            $pubDir = public_path('storage/users');
+            if (file_exists($pubDir)) {
+                @copy($destDir . '/' . $filename, $pubDir . '/' . $filename);
+            }
+
+            $user->profile_pic = $filename;
+            $user->modified_at = now();
+            $user->save();
+
+            if (session('user_id') == $user->user_id) {
+                session([
+                    'user' => $user->fresh()->toArray(),
+                    'user_name' => $user->name,
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Profile photo updated successfully.',
+                'photo_url' => asset('storage/users/' . $filename),
+                'data' => $this->formatUserProfile($user->fresh(), true),
+            ], 200);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'No image file found in the request.',
+        ], 422);
+    }
+
+    /**
+     * Get authenticated member profile in standardized format.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function meProfile(Request $request): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->attributes->get('authenticated_member');
+        if (!$user) {
+            $userId = session('user_id');
+            if ($userId) {
+                $user = User::where('user_id', $userId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+            }
+        }
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated. Active member session is required.',
+            ], 401);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Member profile retrieved successfully.',
+            'data' => $this->formatUserProfile($user, true),
+        ]);
+    }
+
+    /**
+     * Stream profile photo with CORS headers for PDF export & external display.
+     *
+     * @param string $filename
+     * @return mixed
+     */
+    public function getPhoto(string $filename)
+    {
+        $filename = basename($filename);
+        $candidates = [
+            storage_path('app/public/users/' . $filename),
+            public_path('storage/users/' . $filename),
+            public_path('uploads/' . $filename),
+            public_path('images/' . $filename),
+        ];
+
+        foreach ($candidates as $path) {
+            if (file_exists($path) && is_file($path)) {
+                $mime = @mime_content_type($path) ?: 'image/jpeg';
+                return response()->file($path, [
+                    'Content-Type' => $mime,
+                    'Access-Control-Allow-Origin' => '*',
+                    'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+                    'Cache-Control' => 'public, max-age=86400',
+                ]);
+            }
+        }
+
+        return response()->json(['success' => false, 'message' => 'Image not found.'], 404);
+    }
 }
+
 

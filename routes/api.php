@@ -30,7 +30,8 @@ Route::post('/verify-otp', [OtpApiController::class, 'verifyOtp'])->name('api.ot
 // Metadata Options (Active Religions/Sects and Castes)
 Route::get('/meta/options', [MetaApiController::class, 'options'])->name('api.meta.options');
 
-// Public Profile Browsing APIs
+// Public Profile Browsing APIs & Photo Stream
+Route::get('/photo/{filename}', [ProfileApiController::class, 'getPhoto'])->name('api.photo.stream');
 Route::prefix('profiles')->group(function () {
     Route::get('/', [ProfileApiController::class, 'index'])->name('api.profiles.index');
     Route::get('/featured', [ProfileApiController::class, 'featured'])->name('api.profiles.featured');
@@ -39,7 +40,9 @@ Route::prefix('profiles')->group(function () {
 
 // Protected Member Profile Endpoints
 Route::middleware('auth.member')->group(function () {
+    Route::get('/profile', [ProfileApiController::class, 'meProfile'])->name('api.profile.me');
     Route::match(['put', 'post'], '/profile/update', [ProfileApiController::class, 'update'])->name('api.profile.update');
+    Route::post('/profile/photo', [ProfileApiController::class, 'uploadPhoto'])->name('api.profile.photo');
     Route::post('/profile/change-password', [ProfileApiController::class, 'changePassword'])->name('api.profile.change-password');
 });
 
