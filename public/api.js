@@ -9,25 +9,65 @@ const AlNikahAPI = (function () {
   const API_BASE = window.ALNIKAH_API_URL || (isLocalHost ? `http://${currentHost}:8000/api` : '/api');
   const BACKEND_URL = window.ALNIKAH_BACKEND_URL || (isLocalHost ? `http://${currentHost}:8000` : '');
 
+  // Neutral Silhouette Avatar Data URI (Brand themed: Burgundy & Gold silhouette, NO dummy bride/groom)
+  const NEUTRAL_AVATAR = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">' +
+    '<circle cx="60" cy="60" r="58" fill="#faf4eb" stroke="#c5a059" stroke-width="3"/>' +
+    '<circle cx="60" cy="46" r="22" fill="#8c1d28"/>' +
+    '<path d="M26 102 C26 78, 42 68, 60 68 C78 68, 94 102 Z" fill="#8c1d28"/>' +
+    '</svg>'
+  );
+
   // Safe Image URL helper - converts relative paths from backend to full URL or relative local path
-  function resolveImageUrl(path, defaultFallback = 'images/groom-1.webp') {
+  function resolveImageUrl(path, defaultFallback = NEUTRAL_AVATAR) {
     if (!path) return defaultFallback;
-    // For local images/ paths, prefer relative path so html2canvas / canvas never gets CORS-tainted
+    if (typeof path !== 'string') return defaultFallback;
+    path = path.trim();
+    if (!path || path === 'undefined' || path === 'null' || path === 'none') return defaultFallback;
+
+    // 1. Data URI (Base64)
+    if (path.startsWith('data:image/')) return path;
+
+    // 2. Full URL (HTTP / HTTPS)
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      if (isLocalHost && (path.includes('alnikahmarriage.com/storage/users/') || path.includes('alnikahmarriage.com/uploads/'))) {
+        const filename = path.split('/').pop();
+        if (filename) return `${BACKEND_URL}/api/photo/${encodeURIComponent(filename)}`;
+      }
+      return path;
+    }
+
+    // 3. For local frontend images/ paths
     if (path.includes('/images/')) {
       const idx = path.indexOf('/images/');
       return path.substring(idx + 1);
     }
     if (path.startsWith('images/')) return path;
-    if (path.startsWith('http://') || path.startsWith('https://')) return path;
-    if (path.startsWith('/storage/') || path.startsWith('storage/')) {
-      const clean = path.startsWith('/') ? path.substring(1) : path;
+
+    // 4. Clean leading slash
+    const clean = path.startsWith('/') ? path.substring(1) : path;
+
+    // 5. Explicit storage paths
+    if (clean.startsWith('storage/users/')) {
       return `${BACKEND_URL}/${clean}`;
     }
-    if (path.startsWith('/uploads/') || path.startsWith('uploads/')) {
-      const clean = path.startsWith('/') ? path.substring(1) : path;
+    if (clean.startsWith('storage/')) {
       return `${BACKEND_URL}/${clean}`;
     }
-    return `${BACKEND_URL}/uploads/${path}`;
+
+    // 6. Explicit uploads path
+    if (clean.startsWith('uploads/')) {
+      return `${BACKEND_URL}/${clean}`;
+    }
+
+    // 7. API Photo Stream path
+    if (clean.startsWith('api/photo/')) {
+      return `${BACKEND_URL}/${clean}`;
+    }
+
+    // 8. Raw filename from database (e.g. 1775541947-profile_pic-NAZIYA 24.jpg)
+    // Stream through /api/photo which searches storage/app/public/users, public/storage/users, uploads, etc.
+    return `${BACKEND_URL}/api/photo/${encodeURIComponent(clean)}`;
   }
 
   // Toast notification UI
@@ -289,6 +329,14 @@ const AlNikahAPI = (function () {
       return res;
     },
 
+    getAuthProfile: async () => {
+      const res = await request('/profile');
+      if (res && res.success && res.data) {
+        setAuthUser(res.data);
+      }
+      return res;
+    },
+
     // Profile Management
     updateProfile: async (profileData) => {
       const isFormData = profileData instanceof FormData;
@@ -383,8 +431,8 @@ const AlNikahAPI = (function () {
       const isGroom = (p.user_type || '').toUpperCase() === 'GROOM' || p.gender === 'Groom';
       const badgeClass = isGroom ? 'badge-groom' : 'badge-bride';
       const gender = isGroom ? 'Groom' : 'Bride';
-      const image = resolveImageUrl(p.image, isGroom ? 'images/groom-1.webp' : 'images/bride-1.webp');
-      const fallbackImg = isGroom ? 'images/groom-1.webp' : 'images/bride-1.webp';
+      const image = resolveImageUrl(p.image, NEUTRAL_AVATAR);
+      const fallbackImg = NEUTRAL_AVATAR;
 
       return `
         <article class="profile-card profile-card-custom" data-gender="${gender}" data-firqa="${p.firqa || ''}" data-maslak="${p.maslak || ''}" data-caste="${p.caste || ''}" data-status="${p.status || ''}" data-city="${p.city || ''}">
@@ -577,7 +625,7 @@ const AlNikahAPI = (function () {
       // Fetch detailed standardized profile if available
       try {
         const profileRes = await AlNikahAPI.getAuthProfile();
-        if (profileRes.success && profileRes.data) {
+        if (profileRes && profileRes.success && profileRes.data) {
           currentUser = { ...currentUser, ...profileRes.data };
           setAuthUser(currentUser);
         }
@@ -588,10 +636,23 @@ const AlNikahAPI = (function () {
       // 2. Populate Real User Topbar, Avatar & Welcome Banner
       const userName = currentUser.name || 'Respected Member';
       const isGroom = (currentUser.user_type || '').toUpperCase() === 'GROOM' || (currentUser.gender || '').toLowerCase() === 'groom';
-      const defaultAvatar = isGroom ? 'images/groom-1.webp' : 'images/bride-1.webp';
       const userProfileId = currentUser.profile_id || (isGroom ? `ALN-G-${currentUser.user_id || currentUser.id}` : `ALN-B-${currentUser.user_id || currentUser.id}`);
-      const rawAvatar = currentUser.image || currentUser.profile_pic;
-      const userAvatar = resolveImageUrl(rawAvatar, defaultAvatar);
+
+      // Determine real dynamic avatar (priority: base64 -> photo_stream_url -> image -> profile_pic -> neutral avatar)
+      let userAvatar = '';
+      if (currentUser.image_base64) {
+        userAvatar = currentUser.image_base64;
+      } else if (currentUser.photo_stream_url) {
+        userAvatar = currentUser.photo_stream_url;
+      } else if (currentUser.image) {
+        userAvatar = resolveImageUrl(currentUser.image, NEUTRAL_AVATAR);
+      } else if (currentUser.profile_pic) {
+        userAvatar = resolveImageUrl(currentUser.profile_pic, NEUTRAL_AVATAR);
+      } else if (Array.isArray(currentUser.images) && currentUser.images.length > 0) {
+        userAvatar = resolveImageUrl(currentUser.images[0], NEUTRAL_AVATAR);
+      } else {
+        userAvatar = NEUTRAL_AVATAR;
+      }
 
       // Topbar user summary
       const topbarNameEl = document.getElementById('topbar-user-name') || document.querySelector('.topbar-profile-summary span[style*="font-weight: 700"]');
@@ -603,7 +664,10 @@ const AlNikahAPI = (function () {
       const topbarAvatarEl = document.getElementById('topbar-user-avatar') || document.querySelector('.topbar-avatar');
       if (topbarAvatarEl) {
         topbarAvatarEl.src = userAvatar;
-        topbarAvatarEl.onerror = () => { topbarAvatarEl.src = defaultAvatar; };
+        topbarAvatarEl.onerror = () => {
+          topbarAvatarEl.onerror = null;
+          topbarAvatarEl.src = NEUTRAL_AVATAR;
+        };
       }
 
       // Welcome banner
@@ -670,7 +734,10 @@ const AlNikahAPI = (function () {
           const editAvatarEl = document.getElementById('edit-profile-avatar');
           if (editAvatarEl) {
             editAvatarEl.src = userAvatar;
-            editAvatarEl.onerror = () => { editAvatarEl.src = defaultAvatar; };
+            editAvatarEl.onerror = () => {
+              editAvatarEl.onerror = null;
+              editAvatarEl.src = NEUTRAL_AVATAR;
+            };
           }
           const editNameEl = document.getElementById('edit-profile-name');
           if (editNameEl) editNameEl.textContent = userName;
@@ -722,7 +789,7 @@ const AlNikahAPI = (function () {
               try {
                 const uploadRes = await AlNikahAPI.uploadProfilePhoto(file);
                 if (uploadRes.success) {
-                  const newImg = uploadRes.photo_url || (uploadRes.data && uploadRes.data.image) || resolveImageUrl(uploadRes.data?.profile_pic);
+                  const newImg = uploadRes.photo_url || (uploadRes.data && (uploadRes.data.image_base64 || uploadRes.data.photo_stream_url || uploadRes.data.image)) || resolveImageUrl(uploadRes.data?.profile_pic);
                   showToast('Alhamdulillah! Profile photo updated successfully.', 'success');
                   if (editAvatarEl && newImg) editAvatarEl.src = newImg;
                   if (topbarAvatarEl && newImg) topbarAvatarEl.src = newImg;

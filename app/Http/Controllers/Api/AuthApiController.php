@@ -145,20 +145,9 @@ class AuthApiController extends Controller
                         // Ignore if schema differs
                     }
 
-                    $userData = [
-                        'id' => $user->user_id,
-                        'user_id' => $user->user_id,
-                        'profile_id' => $user->profile_id,
-                        'name' => $user->name,
-                        'user_type' => $user->user_type,
-                        'gender' => ($user->user_type === 'GROOM') ? 'Groom' : 'Bride',
-                        'email' => $user->email,
-                        'mobile' => $user->mobile,
-                        'role' => 'user',
-                        'is_verified' => (bool) ($user->is_verified == 1),
-                        'is_active' => (bool) ($user->is_active == 1),
-                        'created_at' => $user->created_at,
-                    ];
+                    $profileController = new ProfileApiController();
+                    $userData = $profileController->formatUserProfile($user, true);
+                    $userData['role'] = 'user';
 
                     if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
                         return response()->json([
@@ -484,22 +473,9 @@ class AuthApiController extends Controller
         ]);
         \Illuminate\Support\Facades\Auth::login($user);
 
-        $userData = [
-            'id' => $user->user_id,
-            'user_id' => $user->user_id,
-            'profile_id' => $user->profile_id,
-            'name' => $user->name,
-            'user_type' => $user->user_type,
-            'gender' => ($user->user_type === 'GROOM') ? 'Groom' : 'Bride',
-            'email' => $user->email,
-            'mobile' => $user->mobile,
-            'qualification' => $user->qualification,
-            'work' => $user->work,
-            'city' => $user->n_address,
-            'package' => $user->package,
-            'is_verified' => false,
-            'created_at' => $user->created_at,
-        ];
+        $profileController = new ProfileApiController();
+        $userData = $profileController->formatUserProfile($user, true);
+        $userData['role'] = 'user';
 
         if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
             return response()->json([
@@ -537,10 +513,14 @@ class AuthApiController extends Controller
         if ($userId) {
             $user = User::find($userId);
             if ($user) {
+                $profileController = new ProfileApiController();
+                $formattedUser = $profileController->formatUserProfile($user, true);
+                $formattedUser['role'] = 'user';
+
                 return response()->json([
                     'success' => true,
                     'role' => 'user',
-                    'user' => $user,
+                    'user' => $formattedUser,
                 ]);
             }
         }
