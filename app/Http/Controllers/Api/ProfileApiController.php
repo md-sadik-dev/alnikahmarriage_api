@@ -240,10 +240,42 @@ class ProfileApiController extends Controller
             return null;
         };
 
-        // Image assignment with graceful fallback
-        $imgIndex = ($user->user_id % 4) + 1;
-        $defaultImg = $isGroom ? asset("images/groom-{$imgIndex}.webp") : asset("images/bride-{$imgIndex}.webp");
-        $imageUrl = $checkPhoto($user->profile_pic) ?: $defaultImg;
+        // Helper to locate physical file on server
+        $resolveLocalPhoto = function ($filename) {
+            if (empty($filename)) return null;
+            $candidates = [
+                storage_path('app/public/users/' . $filename),
+                public_path('storage/users/' . $filename),
+                public_path('uploads/' . $filename),
+                public_path('images/' . $filename),
+            ];
+            foreach ($candidates as $cand) {
+                if (file_exists($cand) && is_file($cand)) {
+                    return $cand;
+                }
+            }
+            return null;
+        };
+
+        // Compute dynamic image URLs and Base64 representation for seamless CORS-free PDF export
+        $base64Photo = null;
+        $imageUrl = null;
+        $photoStreamUrl = null;
+
+        if (!empty($user->profile_pic)) {
+            $localPath = $resolveLocalPhoto($user->profile_pic);
+            if ($localPath) {
+                $imageUrl = asset('storage/users/' . $user->profile_pic);
+                $photoStreamUrl = url('/api/photo/' . $user->profile_pic);
+                $mime = @mime_content_type($localPath) ?: 'image/jpeg';
+                $fileBytes = @file_get_contents($localPath);
+                if ($fileBytes) {
+                    $base64Photo = 'data:' . $mime . ';base64,' . base64_encode($fileBytes);
+                }
+            } else {
+                $imageUrl = $checkPhoto($user->profile_pic);
+            }
+        }
 
         // Format City
         $city = !empty($user->n_address) ? trim($user->n_address) : (!empty($user->address) ? trim($user->address) : 'Not Specified');
@@ -267,7 +299,7 @@ class ProfileApiController extends Controller
             $maslak = trim($user->religion);
         }
 
-        // Fetch all images for this user
+        // Fetch real uploaded images for this user
         $allImages = [];
         if ($imageUrl) {
             $allImages[] = $imageUrl;
@@ -293,19 +325,6 @@ class ProfileApiController extends Controller
             }
         }
 
-        // If less than 5 photos, add tasteful profile portfolio shots so 1/5 slider is complete
-        if (count($allImages) < 5) {
-            $baseIndex = ($user->user_id % 4) + 1;
-            for ($k = 1; $k <= 4; $k++) {
-                if (count($allImages) >= 5) break;
-                $candIndex = (($baseIndex + $k - 1) % 4) + 1;
-                $sampleImg = $isGroom ? asset("images/groom-{$candIndex}.webp") : asset("images/bride-{$candIndex}.webp");
-                if (!in_array($sampleImg, $allImages)) {
-                    $allImages[] = $sampleImg;
-                }
-            }
-        }
-
         $data = [
             'id' => $user->user_id,
             'profile_id' => $profileId,
@@ -316,6 +335,8 @@ class ProfileApiController extends Controller
             'badge_class' => $badgeClass,
             'is_verified' => (bool) ($user->is_verified == 1),
             'image' => $imageUrl,
+            'image_base64' => $base64Photo,
+            'photo_stream_url' => $photoStreamUrl,
             'images' => $allImages,
             'images_count' => count($allImages),
             'education' => !empty($user->qualification) ? trim($user->qualification) : 'Graduate',
@@ -683,6 +704,37 @@ class ProfileApiController extends Controller
             'message' => 'Member profile retrieved successfully.',
             'data' => $this->formatUserProfile($user, true),
         ]);
+    }
+
+    /**
+     * Stream profile photo with CORS headers for PDF export & external display.
+     *
+     * @param string $filename
+     * @return mixed
+     */
+    public function getPhoto(string $filename)
+    {
+        $filename = basename($filename);
+        $candidates = [
+            storage_path('app/public/users/' . $filename),
+            public_path('storage/users/' . $filename),
+            public_path('uploads/' . $filename),
+            public_path('images/' . $filename),
+        ];
+
+        foreach ($candidates as $path) {
+            if (file_exists($path) && is_file($path)) {
+                $mime = @mime_content_type($path) ?: 'image/jpeg';
+                return response()->file($path, [
+                    'Content-Type' => $mime,
+                    'Access-Control-Allow-Origin' => '*',
+                    'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+                    'Cache-Control' => 'public, max-age=86400',
+                ]);
+            }
+        }
+
+        return response()->json(['success' => false, 'message' => 'Image not found.'], 404);
     }
 }
 

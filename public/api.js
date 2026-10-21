@@ -879,8 +879,8 @@ const AlNikahAPI = (function () {
 
           // Update photos if slider exists
           const mainImg = document.getElementById('detail-main-img');
-          if (mainImg && p.image) {
-            mainImg.src = resolveImageUrl(p.image, isGroom ? 'images/groom-1.webp' : 'images/bride-1.webp');
+          if (mainImg && (p.image || p.photo_stream_url)) {
+            mainImg.src = resolveImageUrl(p.photo_stream_url || p.image);
           }
 
           // Express interest button in detail

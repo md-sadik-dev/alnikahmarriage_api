@@ -30,7 +30,8 @@ Route::post('/verify-otp', [OtpApiController::class, 'verifyOtp'])->name('api.ot
 // Metadata Options (Active Religions/Sects and Castes)
 Route::get('/meta/options', [MetaApiController::class, 'options'])->name('api.meta.options');
 
-// Public Profile Browsing APIs
+// Public Profile Browsing APIs & Photo Stream
+Route::get('/photo/{filename}', [ProfileApiController::class, 'getPhoto'])->name('api.photo.stream');
 Route::prefix('profiles')->group(function () {
     Route::get('/', [ProfileApiController::class, 'index'])->name('api.profiles.index');
     Route::get('/featured', [ProfileApiController::class, 'featured'])->name('api.profiles.featured');

@@ -629,18 +629,24 @@
           aria-label="Profile Summary & Gallery"
         >
           <!-- 1/5 PHOTO SLIDER BOX -->
+          <!-- PHOTO SLIDER BOX -->
           <div class="profile-photo-slider-card">
             <img
               id="slider-main-img"
               class="profile-slider-main-img"
-              src="images/groom-1.webp"
+              src=""
               alt="Profile Photo"
+              style="display: none;"
             />
+            <div id="slider-main-placeholder" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 350px; background: #faf6f0; color: #8c7853;">
+              <svg viewBox="0 0 24 24" width="64" height="64" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="7" r="4"></circle><path d="M4 21v-2a6 6 0 0 1 12 0v2"></path></svg>
+            </div>
             <button
               type="button"
               class="slider-nav-btn slider-prev-btn"
               id="slider-prev-btn"
               aria-label="Previous Photo"
+              style="display: none;"
             >
               &lt;
             </button>
@@ -649,31 +655,15 @@
               class="slider-nav-btn slider-next-btn"
               id="slider-next-btn"
               aria-label="Next Photo"
+              style="display: none;"
             >
               &gt;
             </button>
-            <div class="slider-counter-badge" id="slider-counter">1/5</div>
+            <div class="slider-counter-badge" id="slider-counter" style="display: none;">1/1</div>
           </div>
 
-          <!-- 4 THUMBNAILS ROW UNDERNEATH -->
-          <div class="profile-thumbnails-row" id="thumbnails-row">
-            <button
-              type="button"
-              class="profile-thumb-btn active"
-              data-index="0"
-            >
-              <img src="images/groom-1.webp" alt="Thumbnail 1" />
-            </button>
-            <button type="button" class="profile-thumb-btn" data-index="1">
-              <img src="images/groom-2.webp" alt="Thumbnail 2" />
-            </button>
-            <button type="button" class="profile-thumb-btn" data-index="2">
-              <img src="images/groom-3.webp" alt="Thumbnail 3" />
-            </button>
-            <button type="button" class="profile-thumb-btn" data-index="3">
-              <img src="images/groom-4.webp" alt="Thumbnail 4" />
-            </button>
-          </div>
+          <!-- THUMBNAILS ROW (POPULATED ONLY WITH REAL UPLOADED PHOTOS) -->
+          <div class="profile-thumbnails-row" id="thumbnails-row" style="display: none;"></div>
 
           <!-- CANDIDATE NAME & BADGE -->
           <h2 class="sidebar-candidate-name" id="sidebar-name">
@@ -1257,32 +1247,36 @@
           "
         >
           <div
+            id="pdf-photo-wrapper"
             style="
-              width: 70px;
-              height: 70px;
+              width: 76px;
+              height: 76px;
               border-radius: 50%;
               border: 2.5px solid #c5a059;
               overflow: hidden;
               flex-shrink: 0;
               box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+              background: #fdfaf6;
+              display: flex;
+              align-items: center;
+              justify-content: center;
             "
           >
             <img
               id="pdf-photo"
-              src="images/groom-1.webp"
+              src=""
               alt="Candidate Photo"
               style="
                 width: 100%;
                 height: 100%;
                 object-fit: cover;
-                display: block;
+                display: none;
               "
               crossorigin="anonymous"
-              onerror="
-                this.onerror = null;
-                this.src = 'images/groom-1.webp';
-              "
             />
+            <div id="pdf-photo-placeholder" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: #8c7853;">
+              <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="7" r="4"></circle><path d="M4 21v-2a6 6 0 0 1 12 0v2"></path></svg>
+            </div>
           </div>
           <div style="flex: 1">
             <div
@@ -2360,17 +2354,29 @@
         currentImageIndex = index;
 
         const mainImg = document.getElementById("slider-main-img");
+        const placeholder = document.getElementById("slider-main-placeholder");
         const counterBadge = document.getElementById("slider-counter");
 
-        mainImg.style.opacity = "0.4";
-        setTimeout(() => {
-          mainImg.src = AlNikahAPI.resolveImageUrl(
-            galleryImages[currentImageIndex],
-          );
-          mainImg.style.opacity = "1";
-        }, 120);
+        if (mainImg) {
+          mainImg.style.opacity = "0.4";
+          const photoSrc = AlNikahAPI.resolveImageUrl(galleryImages[currentImageIndex]);
+          mainImg.src = photoSrc;
+          mainImg.style.display = "block";
+          if (placeholder) placeholder.style.display = "none";
+          setTimeout(() => {
+            mainImg.style.opacity = "1";
+          }, 100);
+        }
 
-        counterBadge.textContent = `${currentImageIndex + 1}/${galleryImages.length}`;
+        if (counterBadge) {
+          counterBadge.textContent = `${currentImageIndex + 1}/${galleryImages.length}`;
+          counterBadge.style.display = galleryImages.length > 1 ? "block" : "none";
+        }
+
+        const prevBtn = document.getElementById("slider-prev-btn");
+        const nextBtn = document.getElementById("slider-next-btn");
+        if (prevBtn) prevBtn.style.display = galleryImages.length > 1 ? "flex" : "none";
+        if (nextBtn) nextBtn.style.display = galleryImages.length > 1 ? "flex" : "none";
 
         // Update thumbnail active states
         const thumbBtns = document.querySelectorAll(".profile-thumb-btn");
@@ -2384,31 +2390,49 @@
       }
 
       function setupGallery(images) {
-        galleryImages =
-          images && images.length > 0 ? images : ["images/groom-1.webp"];
+        galleryImages = images && Array.isArray(images) && images.length > 0 ? images : [];
         currentImageIndex = 0;
 
-        // Populate Thumbnails
+        const mainImg = document.getElementById("slider-main-img");
+        const placeholder = document.getElementById("slider-main-placeholder");
         const thumbContainer = document.getElementById("thumbnails-row");
-        thumbContainer.innerHTML = "";
 
-        galleryImages.forEach((imgSrc, idx) => {
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = `profile-thumb-btn ${idx === 0 ? "active" : ""}`;
-          btn.dataset.index = idx;
-          btn.innerHTML = `<img src="${AlNikahAPI.resolveImageUrl(imgSrc)}" alt="Thumbnail ${idx + 1}">`;
-          btn.onclick = () => updateSliderImage(idx);
-          thumbContainer.appendChild(btn);
-        });
+        if (galleryImages.length === 0) {
+          if (mainImg) mainImg.style.display = "none";
+          if (placeholder) placeholder.style.display = "flex";
+          if (thumbContainer) {
+            thumbContainer.innerHTML = "";
+            thumbContainer.style.display = "none";
+          }
+          return;
+        }
+
+        // Populate Thumbnails only if multiple photos exist
+        if (thumbContainer) {
+          thumbContainer.innerHTML = "";
+          if (galleryImages.length > 1) {
+            thumbContainer.style.display = "flex";
+            galleryImages.forEach((imgSrc, idx) => {
+              const btn = document.createElement("button");
+              btn.type = "button";
+              btn.className = `profile-thumb-btn ${idx === 0 ? "active" : ""}`;
+              btn.dataset.index = idx;
+              btn.innerHTML = `<img src="${AlNikahAPI.resolveImageUrl(imgSrc)}" alt="Thumbnail ${idx + 1}">`;
+              btn.onclick = () => updateSliderImage(idx);
+              thumbContainer.appendChild(btn);
+            });
+          } else {
+            thumbContainer.style.display = "none";
+          }
+        }
 
         updateSliderImage(0);
 
         // Prev / Next button listeners
-        document.getElementById("slider-prev-btn").onclick = () =>
-          updateSliderImage(currentImageIndex - 1);
-        document.getElementById("slider-next-btn").onclick = () =>
-          updateSliderImage(currentImageIndex + 1);
+        const prevBtn = document.getElementById("slider-prev-btn");
+        const nextBtn = document.getElementById("slider-next-btn");
+        if (prevBtn) prevBtn.onclick = () => updateSliderImage(currentImageIndex - 1);
+        if (nextBtn) nextBtn.onclick = () => updateSliderImage(currentImageIndex + 1);
       }
 
       // Populate profile data onto UI
@@ -2497,11 +2521,10 @@
         document.getElementById("bio-preferred-firqa").textContent =
           `${profile.firqa} / Compatible Family`;
 
-        // Setup images gallery (1/5 slider)
-        const imagesList =
-          profile.images && profile.images.length > 0
-            ? profile.images
-            : [profile.image || "images/groom-1.webp"];
+        // Setup real candidate images gallery (no dummy images)
+        const imagesList = (profile.images && Array.isArray(profile.images) && profile.images.length > 0)
+          ? profile.images
+          : (profile.photo_stream_url || profile.image ? [profile.photo_stream_url || profile.image] : []);
         setupGallery(imagesList);
 
         function setSafeText(id, val, fallback) {
@@ -2514,36 +2537,45 @@
           }
         }
 
-        // Update printable PDF data
+        // Update printable PDF data - 100% Dynamic Candidate Photo
         const pdfPhoto = document.getElementById("pdf-photo");
+        const pdfPhotoPlaceholder = document.getElementById("pdf-photo-placeholder");
         const isGroomProfile = profile.user_type === "GROOM" || profile.gender === "Groom";
-        const fallbackDefaultAvatar = isGroomProfile ? "images/groom-1.webp" : "images/bride-1.webp";
 
         if (pdfPhoto) {
-          const photoUrl = AlNikahAPI.resolveImageUrl(
-            profile.image || imagesList[0],
-            fallbackDefaultAvatar
-          );
-          
-          // Convert image to base64 so html2canvas never experiences canvas cross-origin taint
-          const preImg = new Image();
-          preImg.crossOrigin = "anonymous";
-          preImg.onload = function () {
-            try {
-              const c = document.createElement("canvas");
-              c.width = preImg.naturalWidth || preImg.width;
-              c.height = preImg.naturalHeight || preImg.height;
-              const ctx = c.getContext("2d");
-              ctx.drawImage(preImg, 0, 0);
-              pdfPhoto.src = c.toDataURL("image/jpeg", 0.95);
-            } catch (e) {
-              pdfPhoto.src = photoUrl;
+          // Priority 1: image_base64 directly from API (instant, 100% CORS-proof, zero network latency in canvas)
+          // Priority 2: photo_stream_url (served with Access-Control-Allow-Origin: *)
+          // Priority 3: profile.image or imagesList[0]
+          const dynamicPhotoSource = profile.image_base64 || profile.photo_stream_url || profile.image || (imagesList[0] || null);
+
+          if (dynamicPhotoSource && String(dynamicPhotoSource).trim() !== "") {
+            pdfPhoto.src = dynamicPhotoSource;
+            pdfPhoto.style.display = "block";
+            if (pdfPhotoPlaceholder) pdfPhotoPlaceholder.style.display = "none";
+
+            // If not already base64, pre-render to base64
+            if (!String(dynamicPhotoSource).startsWith("data:")) {
+              const preImg = new Image();
+              preImg.crossOrigin = "anonymous";
+              preImg.onload = function () {
+                try {
+                  const c = document.createElement("canvas");
+                  c.width = preImg.naturalWidth || preImg.width;
+                  c.height = preImg.naturalHeight || preImg.height;
+                  const ctx = c.getContext("2d");
+                  ctx.drawImage(preImg, 0, 0);
+                  pdfPhoto.src = c.toDataURL("image/jpeg", 0.95);
+                } catch (e) {
+                  // Keep dynamicPhotoSource
+                }
+              };
+              preImg.src = dynamicPhotoSource;
             }
-          };
-          preImg.onerror = function () {
-            pdfPhoto.src = photoUrl;
-          };
-          preImg.src = photoUrl;
+          } else {
+            pdfPhoto.src = "";
+            pdfPhoto.style.display = "none";
+            if (pdfPhotoPlaceholder) pdfPhotoPlaceholder.style.display = "flex";
+          }
         }
 
         setSafeText("pdf-name", profile.name, "Verified Member");
@@ -2709,10 +2741,7 @@
                 resolve();
               } else {
                 img.onload = resolve;
-                img.onerror = () => {
-                  if (img.id === "pdf-photo") img.src = "images/groom-1.webp";
-                  resolve();
-                };
+                img.onerror = resolve;
                 setTimeout(resolve, 350);
               }
             });
