@@ -148,20 +148,142 @@ class User extends Authenticatable
     }
 
     /**
-     * Calculate days since registration based on created_at timestamp.
+     * Check if user package has expired.
+     *
+     * @return bool
+     */
+    public function isPackageExpired(): bool
+    {
+        if (empty($this->end_date)) {
+            return true;
+        }
+        $endStr = strtoupper(trim($this->end_date));
+        if (str_contains($endStr, 'UNLIMITED') || str_contains($endStr, 'NIKAH')) {
+            return false;
+        }
+        try {
+            $endDate = \Carbon\Carbon::parse($this->end_date)->endOfDay();
+            return $endDate->isPast();
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Check if user package is active.
+     *
+     * @return bool
+     */
+    public function isPackageActive(): bool
+    {
+        return !$this->isPackageExpired();
+    }
+
+    /**
+     * Calculate user age from dob attribute.
+     *
+     * @return int
+     */
+    public function calculateAge(): int
+    {
+        if (empty($this->dob)) {
+            return 25;
+        }
+        $rawAge = 0;
+        if (preg_match('/^\d+/', trim($this->dob), $matches)) {
+            $rawAge = (int) $matches[0];
+        }
+        if ($rawAge >= 1900) {
+            return (int) date('Y') - $rawAge;
+        }
+        return $rawAge > 0 ? $rawAge : 25;
+    }
+
+    /**
+     * Check if user belongs to Shia or Bohra sect.
+     *
+     * @return bool
+     */
+    public function isShia(): bool
+    {
+        $rel = strtolower($this->religion ?? '');
+        $sct = strtolower($this->sect ?? '');
+        return (
+            str_contains($rel, 'shia') ||
+            str_contains($rel, 'bohra') ||
+            str_contains($sct, 'shia') ||
+            str_contains($sct, 'bohra')
+        );
+    }
+
+    /**
+     * Calculate daily unlocked profile count based on days difference * 2.
+     *
+     * @return int
+     */
+    public function getUnlockedProfileCount(): int
+    {
+        $startDate = $this->start_date ?: $this->created_at;
+        if (!$startDate) {
+            return 2;
+        }
+        try {
+            $currentDate = \Carbon\Carbon::now()->startOfDay();
+            $start = \Carbon\Carbon::parse($startDate)->startOfDay();
+            $daysDifference = $start->diffInDays($currentDate) + 1;
+            return max(2, (int) ($daysDifference * 2));
+        } catch (\Throwable $e) {
+            return 2;
+        }
+    }
+
+    /**
+     * Get profile view limits record from profile_view_limits table.
+     *
+     * @return object|null
+     */
+    public function getProfileViewLimits()
+    {
+        return \Illuminate\Support\Facades\DB::table('profile_view_limits')
+            ->where('viewer_user_id', $this->user_id)
+            ->first();
+    }
+
+    /**
+     * Check if viewer has already viewed given profile.
+     *
+     * @param int|string $profileUserId
+     * @return bool
+     */
+    public function hasViewedProfile($profileUserId): bool
+    {
+        return \Illuminate\Support\Facades\DB::table('profile_views')
+            ->where('viewer_user_id', $this->user_id)
+            ->where('profile_user_id', $profileUserId)
+            ->exists();
+    }
+
+    /**
+     * Calculate days since user registration.
      *
      * @return int
      */
     public function daysSinceRegistration(): int
     {
-        if (!$this->created_at) {
-            return 999;
+        $startDate = $this->start_date ?: $this->created_at;
+        if (!$startDate) {
+            return 0;
         }
-        return (int) \Carbon\Carbon::parse($this->created_at)->diffInDays(\Carbon\Carbon::now());
+        try {
+            $created = \Carbon\Carbon::parse($startDate)->startOfDay();
+            return max(0, (int) $created->diffInDays(\Carbon\Carbon::now()->startOfDay()));
+        } catch (\Throwable $e) {
+            return 0;
+        }
     }
 
     /**
-     * Check if user is within the initial 3-day signup trial window.
+     * Check if user is within 3 day trial window.
      *
      * @return bool
      */
