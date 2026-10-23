@@ -18,51 +18,164 @@ class ProfileApiController extends Controller
      * @param Request $request
      * @return JsonResponse
      */
+    /**
+     * Get list of matrimonial profiles from database implementing 5 core business matching rules.
+     *
+     * Rule 1: Opposite Gender / User Type Rule & Exclude Self (Verified & Active only)
+     * Rule 2: Firqa / Sect Isolation Rule (Shia vs Sunni)
+     * Rule 3: Marital Status & Age Matching Rule (Age >= 40: Divorced/Khula; Age < 40: strictly match status)
+     * Rule 4: Day-by-Day Profile Unlocking Progression Limit (Days * 2)
+     * Rule 5: Search Matching Rules (Forcefully retain opposite gender & isolation)
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
     public function index(Request $request): JsonResponse
     {
+        $viewer = $this->resolveViewer($request);
         $query = User::query();
 
-        // Optional filter by is_deleted
+        // Base criteria: is_deleted = 0, is_verified = 1 (matching old core PHP getAllProfile)
         $query->where(function ($q) {
             $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
         });
+        $query->where('is_verified', 1);
 
-        // Gender / Type filter (GROOM or BRIDE)
-        if ($request->filled('type') || $request->filled('gender')) {
-            $gender = strtoupper(trim($request->input('type', $request->input('gender'))));
-            if ($gender === 'GROOM' || $gender === 'BRIDE') {
-                $query->where('user_type', $gender);
+        // RULE 1: Opposite Gender Rule & Exclude Self
+        if ($viewer) {
+            $viewerType = strtoupper(trim($viewer->user_type ?? ''));
+            $oppositeType = ($viewerType === 'BRIDE') ? 'GROOM' : 'BRIDE';
+            $query->where('user_type', $oppositeType);
+            $query->where('user_id', '<>', $viewer->user_id);
+
+            // RULE 2: Firqa / Sect Isolation Rule (Shia vs Sunni)
+            if ($viewer->isShia()) {
+                // Shia/Bohra users match only Shia or Bohra profiles
+                $query->where(function ($q) {
+                    $q->where('religion', 'LIKE', '%shia%')
+                      ->orWhere('religion', 'LIKE', '%bohra%')
+                      ->orWhere('sect', 'LIKE', '%shia%')
+                      ->orWhere('sect', 'LIKE', '%bohra%');
+                });
+            } else {
+                // Non-Shia users (Sunni/Deobandi/Barelvi/Ahle Hadees etc.) match strictly non-Shia profiles
+                $query->where(function ($q) {
+                    $q->where('religion', 'NOT LIKE', '%shia%')
+                      ->where('religion', 'NOT LIKE', '%bohra%')
+                      ->where('sect', 'NOT LIKE', '%shia%')
+                      ->where('sect', 'NOT LIKE', '%bohra%');
+                });
+            }
+
+            // RULE 3: Marital Status & Age Matching Rule (Applied when user has NOT explicitly filtered by marital status)
+            $hasExplicitStatusFilter = $request->filled('marital_status') || $request->filled('status') || $request->filled('maritalStatus');
+            if (!$hasExplicitStatusFilter) {
+                $userAge = $viewer->calculateAge();
+                $userMarital = strtolower(trim($viewer->marital_status ?? ''));
+                if ($userAge >= 40) {
+                    // Rule A: Age >= 40 -> Regardless of marital status, only Divorced or Khula match
+                    $query->where(function ($q) {
+                        $q->whereRaw("(LOWER(marital_status) LIKE '%divor%' OR LOWER(marital_status) LIKE '%khul%')");
+                    });
+                } else {
+                    // Rule B: Age < 40
+                    if (str_contains($userMarital, 'unmarri') || $userMarital === 'single' || str_contains($userMarital, 'never marri')) {
+                        $query->where(function ($q) {
+                            $q->whereRaw("(LOWER(marital_status) LIKE '%unmarri%' OR LOWER(marital_status) = 'single' OR LOWER(marital_status) LIKE '%never marri%')");
+                        });
+                    } elseif (str_contains($userMarital, 'divor') || str_contains($userMarital, 'khul')) {
+                        $query->where(function ($q) {
+                            $q->whereRaw("(LOWER(marital_status) LIKE '%divor%' OR LOWER(marital_status) LIKE '%khul%')");
+                        });
+                    }
+                }
+            }
+        } else {
+            // Guest browsing: filter by gender if explicitly requested
+            if ($request->filled('type') || $request->filled('gender')) {
+                $gender = strtoupper(trim($request->input('type', $request->input('gender'))));
+                if ($gender === 'GROOM' || $gender === 'BRIDE') {
+                    $query->where('user_type', $gender);
+                }
             }
         }
 
-        // Firqa / Sect filter
-        if ($request->filled('firqa') || $request->filled('sect')) {
-            $sect = trim($request->input('firqa', $request->input('sect')));
-            if ($sect !== 'All' && !empty($sect)) {
-                $query->where('sect', 'LIKE', "%{$sect}%");
-            }
-        }
+        $isSearch = $request->boolean('is_search')
+            || $request->filled('firqa')
+            || $request->filled('religion')
+            || $request->filled('sect')
+            || $request->filled('maslak')
+            || $request->filled('caste')
+            || $request->filled('status')
+            || $request->filled('marital_status')
+            || $request->filled('maritalStatus')
+            || $request->filled('city')
+            || $request->filled('search')
+            || $request->filled('q');
 
-        // Maslak filter
-        if ($request->filled('maslak')) {
-            $maslak = trim($request->input('maslak'));
-            if ($maslak !== 'All' && !empty($maslak)) {
-                $query->where(function ($q) use ($maslak) {
-                    $q->where('religion', 'LIKE', "%{$maslak}%")
-                      ->orWhere('sect', 'LIKE', "%{$maslak}%");
+
+        // RULE 5 / Step 3: Additional Search & Filter Form Inputs
+        // Firqa / Religion filter (users.religion)
+        if ($request->filled('firqa') || $request->filled('religion')) {
+            $firqa = trim($request->input('firqa', $request->input('religion')));
+            if ($firqa !== 'All' && !empty($firqa)) {
+                $query->where(function ($q) use ($firqa) {
+                    $q->where('religion', 'LIKE', "%{$firqa}%")
+                      ->orWhere('sect', 'LIKE', "%{$firqa}%");
                 });
             }
         }
 
-        // Caste filter
-        if ($request->filled('caste')) {
-            $caste = trim($request->input('caste'));
-            if ($caste !== 'All' && !empty($caste)) {
-                $query->where('caste', 'LIKE', "%{$caste}%");
+        // Maslak / Sect filter (users.sect) with spelling variants normalization
+        if ($request->filled('maslak') || $request->filled('sect')) {
+            $maslak = trim($request->input('maslak', $request->input('sect')));
+            if ($maslak !== 'All' && !empty($maslak)) {
+                $maslakLower = strtolower($maslak);
+                $query->where(function ($q) use ($maslak, $maslakLower) {
+                    if (str_contains($maslakLower, 'barelv') || str_contains($maslakLower, 'baralv')) {
+                        $q->where('sect', 'LIKE', '%baral%')
+                          ->orWhere('sect', 'LIKE', '%barel%');
+                    } elseif (str_contains($maslakLower, 'deoband') || str_contains($maslakLower, 'devband')) {
+                        $q->where('sect', 'LIKE', '%devb%')
+                          ->orWhere('sect', 'LIKE', '%deob%');
+                    } elseif (str_contains($maslakLower, 'salafi') || str_contains($maslakLower, 'hadees') || str_contains($maslakLower, 'hadish')) {
+                        $q->where('sect', 'LIKE', '%salafi%')
+                          ->orWhere('sect', 'LIKE', '%hadees%')
+                          ->orWhere('sect', 'LIKE', '%hadish%');
+                    } elseif (str_contains($maslakLower, 'hanafi') || str_contains($maslakLower, 'hanfi')) {
+                        $q->where('sect', 'LIKE', '%hanfi%')
+                          ->orWhere('sect', 'LIKE', '%hanafi%')
+                          ->orWhere('sect', 'LIKE', '%sunni%');
+                    } else {
+                        $q->where('sect', 'LIKE', "%{$maslak}%")
+                          ->orWhere('religion', 'LIKE', "%{$maslak}%");
+                    }
+                });
             }
         }
 
-        // City filter
+        // Caste filter (users.caste) with spelling variants normalization
+        if ($request->filled('caste')) {
+            $caste = trim($request->input('caste'));
+            if ($caste !== 'All' && !empty($caste)) {
+                $casteLower = strtolower($caste);
+                $query->where(function ($q) use ($caste, $casteLower) {
+                    if (str_contains($casteLower, 'quresh') || str_contains($casteLower, 'qurash')) {
+                        $q->where('caste', 'LIKE', '%qur%');
+                    } elseif (str_contains($casteLower, 'sheikh') || str_contains($casteLower, 'shaikh')) {
+                        $q->where('caste', 'LIKE', '%sheikh%')
+                          ->orWhere('caste', 'LIKE', '%shaikh%');
+                    } elseif (str_contains($casteLower, 'pathan') || str_contains($casteLower, 'khan')) {
+                        $q->where('caste', 'LIKE', '%pathan%')
+                          ->orWhere('caste', 'LIKE', '%khan%');
+                    } else {
+                        $q->where('caste', 'LIKE', "%{$caste}%");
+                    }
+                });
+            }
+        }
+
+        // City filter (users.n_address, address, prefered_location)
         if ($request->filled('city')) {
             $city = trim($request->input('city'));
             if ($city !== 'All' && !empty($city)) {
@@ -74,11 +187,24 @@ class ProfileApiController extends Controller
             }
         }
 
-        // Marital Status filter
-        if ($request->filled('marital_status') || $request->filled('status')) {
-            $status = trim($request->input('marital_status', $request->input('status')));
-            if ($status !== 'All' && !empty($status)) {
-                $query->where('marital_status', 'LIKE', "%{$status}%");
+        // Marital Status explicit filter (users.marital_status) for both logged-in and guest users
+        if ($request->filled('marital_status') || $request->filled('status') || $request->filled('maritalStatus')) {
+            $statusInput = trim($request->input('marital_status', $request->input('status', $request->input('maritalStatus'))));
+            if ($statusInput !== 'All' && !empty($statusInput)) {
+                $statusLower = strtolower($statusInput);
+                $query->where(function ($q) use ($statusInput, $statusLower) {
+                    if (str_contains($statusLower, 'never') || str_contains($statusLower, 'unmarr') || $statusLower === 'single') {
+                        $q->whereRaw("(LOWER(marital_status) LIKE '%unmarr%' OR LOWER(marital_status) = 'single' OR LOWER(marital_status) LIKE '%never marri%')");
+                    } elseif (str_contains($statusLower, 'divorc') || str_contains($statusLower, 'khul')) {
+                        $q->whereRaw("(LOWER(marital_status) LIKE '%divor%' OR LOWER(marital_status) LIKE '%khul%')");
+                    } elseif (str_contains($statusLower, 'widow')) {
+                        $q->whereRaw("(LOWER(marital_status) LIKE '%widow%')");
+                    } elseif (str_contains($statusLower, 'separat')) {
+                        $q->whereRaw("(LOWER(marital_status) LIKE '%separat%')");
+                    } else {
+                        $q->where('marital_status', 'LIKE', "%{$statusInput}%");
+                    }
+                });
             }
         }
 
@@ -98,10 +224,31 @@ class ProfileApiController extends Controller
         // Order by active status first, then latest created
         $query->orderBy('is_active', 'desc')->orderBy('user_id', 'desc');
 
-        $limit = (int) $request->input('limit', 20);
-        $limit = ($limit > 100 || $limit < 1) ? 20 : $limit;
+        // RULE 4: Day-by-Day Profile Unlocking Progression Limit (Days * 2)
+        $unlockedProfileCount = $viewer ? $viewer->getUnlockedProfileCount() : 20;
+        $daysSinceStart = $viewer ? max(1, (int) ($unlockedProfileCount / 2)) : 1;
 
-        $viewer = $this->resolveViewer($request);
+        // Dynamic limit matching old core PHP: default to user's unlocked progression limit (Days * 2)
+        if ($request->filled('limit')) {
+            $limit = (int) $request->input('limit');
+            if ($limit <= 0) {
+                $limit = $viewer ? $unlockedProfileCount : 20;
+            } else {
+                $maxAllowed = $viewer ? max($unlockedProfileCount, 500) : 100;
+                $limit = min($limit, $maxAllowed);
+            }
+        } else {
+            // When no limit is passed, default to user's daily progression quota (e.g. 214 for Liaqat, 262 for Farzana)
+            $limit = $viewer ? $unlockedProfileCount : 20;
+        }
+
+        // Apply daily progression limit if requested or feed mode
+        if ($request->boolean('daily_limit') || $request->input('mode') === 'daily') {
+            $limit = min($limit, $unlockedProfileCount);
+        }
+
+        $viewerHasPackage = $viewer ? $viewer->isPackageActive() : false;
+        $isPackageExpired = $viewer ? $viewer->isPackageExpired() : false;
 
         if ($request->boolean('paginate', false)) {
             $paginator = $query->paginate($limit);
@@ -113,7 +260,11 @@ class ProfileApiController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Profiles retrieved successfully.',
-                'viewer_has_package' => $viewer ? $viewer->hasActivePaidPackage() : false,
+                'viewer_has_package' => $viewerHasPackage,
+                'is_package_expired' => $isPackageExpired,
+                'daily_unlocked_limit' => $unlockedProfileCount,
+                'days_since_start' => $daysSinceStart,
+                'target_gender' => $viewer ? (($viewer->user_type === 'BRIDE') ? 'GROOM' : 'BRIDE') : null,
                 'data' => $paginator,
             ]);
         }
@@ -126,44 +277,94 @@ class ProfileApiController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Profiles retrieved successfully.',
-            'viewer_has_package' => $viewer ? $viewer->hasActivePaidPackage() : false,
+            'viewer_has_package' => $viewerHasPackage,
+            'is_package_expired' => $isPackageExpired,
+            'daily_unlocked_limit' => $unlockedProfileCount,
+            'days_since_start' => $daysSinceStart,
+            'target_gender' => $viewer ? (($viewer->user_type === 'BRIDE') ? 'GROOM' : 'BRIDE') : null,
             'count' => $formatted->count(),
             'data' => $formatted,
         ]);
     }
 
     /**
-     * Get featured profiles for homepage carousel (mix of Grooms & Brides).
+     * Get featured profiles for homepage carousel.
+     * Logged-in users see matching opposite gender under Shia/Sunni isolation.
+     * Guests see a mix of Grooms and Brides.
      *
      * @param Request $request
      * @return JsonResponse
      */
     public function featured(Request $request): JsonResponse
     {
+        $viewer = $this->resolveViewer($request);
         $limitEach = (int) $request->input('limit_each', 4);
         if ($limitEach < 1 || $limitEach > 20) {
             $limitEach = 4;
         }
 
-        $grooms = User::where('user_type', 'GROOM')
-            ->where(function ($q) {
-                $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
-            })
+        $baseQuery = function () use ($viewer) {
+            $q = User::where(function ($sub) {
+                $sub->whereNull('is_deleted')->orWhere('is_deleted', 0);
+            })->where('is_active', 1)->where('is_verified', 1);
+
+            if ($viewer) {
+                $q->where('user_id', '<>', $viewer->user_id);
+                if ($viewer->isShia()) {
+                    $q->where(function ($sq) {
+                        $sq->where('religion', 'LIKE', '%shia%')
+                           ->orWhere('religion', 'LIKE', '%bohra%')
+                           ->orWhere('sect', 'LIKE', '%shia%')
+                           ->orWhere('sect', 'LIKE', '%bohra%');
+                    });
+                } else {
+                    $q->where(function ($sq) {
+                        $sq->where('religion', 'NOT LIKE', '%shia%')
+                           ->where('religion', 'NOT LIKE', '%bohra%')
+                           ->where('sect', 'NOT LIKE', '%shia%')
+                           ->where('sect', 'NOT LIKE', '%bohra%');
+                    });
+                }
+            }
+
+            return $q;
+        };
+
+        if ($viewer) {
+            // Logged in: show opposite gender only
+            $oppositeType = (strtoupper(trim($viewer->user_type ?? '')) === 'BRIDE') ? 'GROOM' : 'BRIDE';
+            $featured = $baseQuery()
+                ->where('user_type', $oppositeType)
+                ->orderBy('is_active', 'desc')
+                ->orderBy('user_id', 'desc')
+                ->take($limitEach * 2)
+                ->get()
+                ->map(function ($user) use ($viewer, $request) {
+                    return $this->formatUserProfile($user, false, $viewer, $request);
+                });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Featured matched profiles retrieved successfully.',
+                'viewer_has_package' => $viewer->isPackageActive(),
+                'is_package_expired' => $viewer->isPackageExpired(),
+                'total' => $featured->count(),
+                'data' => $featured,
+            ]);
+        }
+
+        // Guest: show balanced mix of grooms and brides
+        $grooms = $baseQuery()->where('user_type', 'GROOM')
             ->orderBy('is_active', 'desc')
             ->orderBy('user_id', 'desc')
             ->take($limitEach)
             ->get();
 
-        $brides = User::where('user_type', 'BRIDE')
-            ->where(function ($q) {
-                $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
-            })
+        $brides = $baseQuery()->where('user_type', 'BRIDE')
             ->orderBy('is_active', 'desc')
             ->orderBy('user_id', 'desc')
             ->take($limitEach)
             ->get();
-
-        $viewer = $this->resolveViewer($request);
 
         $combined = $grooms->concat($brides)->map(function ($user) use ($viewer, $request) {
             return $this->formatUserProfile($user, false, $viewer, $request);
@@ -172,7 +373,8 @@ class ProfileApiController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Featured profiles retrieved successfully.',
-            'viewer_has_package' => $viewer ? $viewer->hasActivePaidPackage() : false,
+            'viewer_has_package' => false,
+            'is_package_expired' => false,
             'total' => $combined->count(),
             'grooms_count' => $grooms->count(),
             'brides_count' => $brides->count(),
@@ -205,7 +407,120 @@ class ProfileApiController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Profile details retrieved successfully.',
-            'viewer_has_package' => $viewer ? $viewer->hasActivePaidPackage() : false,
+            'viewer_has_package' => $viewer ? $viewer->isPackageActive() : false,
+            'is_package_expired' => $viewer ? $viewer->isPackageExpired() : false,
+            'data' => $this->formatUserProfile($user, true, $viewer, $request),
+        ]);
+    }
+
+    /**
+     * Unlock candidate contact details using view quota (Section C Paywall Protection).
+     *
+     * Check 1: User's package expired (end_date < today) -> package_expired alert
+     * Check 2: Already viewed (profile_views table) -> viewed (direct view, no count deducted)
+     * Check 3: Total package view limit exceeded (use_package_profile_limit >= package_profile_limit) -> limit_reached_package
+     * Check 4: Success -> use_package_profile_limit + 1, insert into profile_views
+     *
+     * @param Request $request
+     * @param string|int $id
+     * @return JsonResponse
+     */
+    public function unlockProfile(Request $request, $id): JsonResponse
+    {
+        $viewer = $this->resolveViewer($request);
+        if (!$viewer) {
+            return response()->json([
+                'success' => false,
+                'view_status' => 'login_required',
+                'message' => 'Please login to view candidate contact details.',
+            ], 401);
+        }
+
+        $user = User::where('user_id', $id)
+            ->orWhere('profile_id', $id)
+            ->first();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Profile not found.',
+            ], 404);
+        }
+
+        // Self profile always unlocked
+        if ($viewer->user_id == $user->user_id) {
+            return response()->json([
+                'success' => true,
+                'view_status' => 'self',
+                'message' => 'This is your own profile.',
+                'data' => $this->formatUserProfile($user, true, $viewer, $request),
+            ]);
+        }
+
+        // Check 1: Has this profile already been viewed by the logged-in user? (Always accessible even if package expired)
+        if ($viewer->hasViewedProfile($user->user_id)) {
+            return response()->json([
+                'success' => true,
+                'view_status' => 'viewed',
+                'message' => 'Candidate contact details already unlocked.',
+                'data' => $this->formatUserProfile($user, true, $viewer, $request),
+            ]);
+        }
+
+        // Check 2: User's package expired? (Blocks unlocking NEW unviewed profiles)
+        if ($viewer->isPackageExpired()) {
+            return response()->json([
+                'success' => false,
+                'view_status' => 'package_expired',
+                'message' => 'Your membership package has expired. Please renew your package to view candidate contact details.',
+            ], 403);
+        }
+
+        // Check 3: Check package view limits in profile_view_limits table
+        $limits = $viewer->getProfileViewLimits();
+        if (!$limits) {
+            return response()->json([
+                'success' => false,
+                'view_status' => 'limit_reached_package',
+                'message' => 'No active package view limit found. Please select a membership package to unlock contacts.',
+            ], 403);
+        }
+
+        $packageLimit = (int) $limits->package_profile_limit;
+        $usePackageLimit = (int) $limits->use_package_profile_limit;
+
+        if ($usePackageLimit >= $packageLimit) {
+            return response()->json([
+                'success' => false,
+                'view_status' => 'limit_reached_package',
+                'message' => 'You have reached your package profile view limit (' . $packageLimit . ' profiles). Please upgrade your package to unlock more contacts.',
+                'package_profile_limit' => $packageLimit,
+                'use_package_profile_limit' => $usePackageLimit,
+                'remaining_views' => 0,
+            ], 403);
+        }
+
+        // Check 4: Success - Increment use_package_profile_limit and record in profile_views
+        \Illuminate\Support\Facades\DB::table('profile_view_limits')
+            ->where('viewer_user_id', $viewer->user_id)
+            ->increment('use_package_profile_limit');
+
+        \Illuminate\Support\Facades\DB::table('profile_views')->insert([
+            'viewer_user_id' => $viewer->user_id,
+            'profile_user_id' => $user->user_id,
+            'viewed_at' => now(),
+        ]);
+
+        $newUsed = $usePackageLimit + 1;
+        $remainingViews = max(0, $packageLimit - $newUsed);
+
+        return response()->json([
+            'success' => true,
+            'view_status' => 'success',
+            'message' => 'Candidate contact details unlocked successfully! (' . $remainingViews . ' views remaining)',
+            'package_profile_limit' => $packageLimit,
+            'use_package_profile_limit' => $newUsed,
+            'remaining_views' => $remainingViews,
             'data' => $this->formatUserProfile($user, true, $viewer, $request),
         ]);
     }
@@ -330,41 +645,51 @@ class ProfileApiController extends Controller
         $isWithin3Days = $user->isWithin3DayTrial();
 
         // -------------------------------------------------------------
-        // ACCESS CONTROL DECISION ENGINE:
+        // ACCESS CONTROL DECISION ENGINE (Section C Paywall Protection)
         // -------------------------------------------------------------
         // 1. Self viewing own profile -> Full unblurred access & full contacts
-        // 2. Target has NOT paid:
-        //    - First 3 days: other users see blurred photo & name, hidden contacts
-        //    - After 3 days without payment: remains blurred, hidden contacts
-        // 3. Target HAS paid & activated:
-        //    - Visible unblurred ONLY to users with active eligible package
-        //    - Contacts visible ONLY to users with active package granting contact access
-        // 4. Viewer has NOT purchased a package:
-        //    - Always sees blurred photo & name, hidden contacts
+        // 2. Already viewed by viewer (profile_views table) -> Full unblurred access & full contacts
+        // 3. Viewer has NOT logged in (Guest) -> Blurred photo & hidden contacts ('login_required')
+        // 4. Viewer package has expired (end_date < today) -> Blurred photo & hidden contacts ('package_expired')
+        // 5. Viewer has active package -> Photo unblurred, contact hidden until unlocked via quota ('unlockable' / 'limit_reached_package')
         // -------------------------------------------------------------
+        $hasViewed = false;
+        $viewStatus = 'login_required';
+        $limits = null;
+        $remainingLimit = 0;
+
         if ($isSelf) {
             $isBlurred = false;
             $canViewContact = true;
-        } else {
-            if (!$viewerHasPaid) {
-                // Any viewer without an active paid package ALWAYS sees blurred name/photo & hidden contacts
-                $isBlurred = true;
+            $viewStatus = 'self';
+        } elseif ($viewer) {
+            $hasViewed = $viewer->hasViewedProfile($user->user_id);
+            $limits = $viewer->getProfileViewLimits();
+            $pkgLimit = $limits ? (int) $limits->package_profile_limit : 0;
+            $usedLimit = $limits ? (int) $limits->use_package_profile_limit : 0;
+            $remainingLimit = max(0, $pkgLimit - $usedLimit);
+
+            if ($hasViewed) {
+                // Already viewed & recorded in profile_views table: unblurred & full contacts permanently unlocked
+                $isBlurred = false;
+                $canViewContact = true;
+                $viewStatus = 'viewed';
+            } elseif ($viewer->isPackageExpired()) {
+                // Expired subscriber: candidate cards on dashboard/recommendations shown without blur (matching old core PHP), but contacts locked
+                $isBlurred = false;
                 $canViewContact = false;
+                $viewStatus = 'package_expired';
             } else {
-                // Viewing user HAS an active paid package (eligible viewer)
-                if ($targetHasPaid) {
-                    // Both have paid: fully visible unblurred & contacts unlocked
-                    $isBlurred = false;
-                    $canViewContact = true;
-                } else {
-                    // Target has NOT purchased a package:
-                    // During first 3 days of signup: eligible paid viewers can view photo & name unblurred
-                    // After 3 days without payment: remains blurred until target package is purchased & activated
-                    // Mobile and address must strictly remain hidden while target is unpaid
-                    $isBlurred = $isWithin3Days ? false : true;
-                    $canViewContact = false;
-                }
+                // Active subscriber viewing an unviewed profile: unblurred photo, but candidate phone/address locked until view quota deducted
+                $isBlurred = false;
+                $canViewContact = false;
+                $viewStatus = ($usedLimit >= $pkgLimit) ? 'limit_reached_package' : 'unlockable';
             }
+        } else {
+            // Guest visitor: blurred photo & locked contacts
+            $isBlurred = true;
+            $canViewContact = false;
+            $viewStatus = 'login_required';
         }
 
         $isGroom = strtoupper(trim($user->user_type ?? '')) === 'GROOM';
@@ -432,7 +757,7 @@ class ProfileApiController extends Controller
                 // Return crisp original photo endpoint
                 $localPath = $resolveLocalPhoto($user->profile_pic);
                 if ($localPath) {
-                    $imageUrl = asset('storage/users/' . $user->profile_pic);
+                    $imageUrl = $checkPhoto($user->profile_pic) ?: asset('storage/users/' . $user->profile_pic);
                     $photoStreamUrl = url('/api/photo/' . rawurlencode($user->profile_pic));
                     $mime = @mime_content_type($localPath) ?: 'image/jpeg';
                     $fileBytes = @file_get_contents($localPath);
@@ -523,7 +848,11 @@ class ProfileApiController extends Controller
             'is_photo_blurred' => $isBlurred,
             'can_view_contact' => $canViewContact,
             'contact_locked' => !$canViewContact,
-            'contact_locked_message' => !$canViewContact ? 'Mobile number and address are protected. Please purchase an active membership package to view contact details.' : '',
+            'contact_locked_message' => !$canViewContact ? 'Mobile number and address are protected. Please purchase or use your profile view quota to unlock contact details.' : '',
+            'view_status' => $viewStatus,
+            'has_viewed' => $hasViewed,
+            'remaining_views' => $remainingLimit,
+            'is_package_expired' => $viewer ? $viewer->isPackageExpired() : false,
             'target_has_paid_package' => $targetHasPaid,
             'viewer_has_paid_package' => $viewerHasPaid,
             'days_since_registration' => $daysSinceRegistration,
@@ -790,8 +1119,8 @@ class ProfileApiController extends Controller
             ], 422);
         }
 
-        // Store new password with supported secure hashing
-        $user->password = Hash::make(trim($newPassword));
+        // Store new password
+        $user->password = trim($newPassword);
         $user->modified_at = now();
         $user->save();
 
@@ -1041,48 +1370,13 @@ class ProfileApiController extends Controller
 
         $filename = basename($filename);
 
-        // Determine profile owner for this photo
-        $ownerUser = User::where('profile_pic', $filename)
-            ->orWhere('profile_pic1', $filename)
-            ->first();
-
-        if (!$ownerUser) {
-            $dbImg = \Illuminate\Support\Facades\DB::table('users_images')
-                ->where('images', $filename)
-                ->first();
-            if ($dbImg) {
-                $ownerUser = User::where('user_id', $dbImg->user_id)->first();
-            }
-        }
-
-        if ($ownerUser) {
-            $viewer = $this->resolveViewer($request);
-            $isSelf = ($viewer && $viewer->user_id == $ownerUser->user_id);
-            $targetHasPaid = $ownerUser->hasActivePaidPackage();
-            $viewerHasPaid = $viewer ? $viewer->hasActivePaidPackage() : false;
-            $isWithin3Days = $ownerUser->isWithin3DayTrial();
-
-            $shouldBlur = true;
-            if ($isSelf) {
-                $shouldBlur = false;
-            } elseif ($viewerHasPaid) {
-                if ($targetHasPaid) {
-                    $shouldBlur = false;
-                } elseif ($isWithin3Days) {
-                    $shouldBlur = false;
-                }
-            }
-
-            if ($shouldBlur) {
-                return $this->getBlurredPhoto($filename);
-            }
-        }
-
         $candidates = [
             storage_path('app/public/users/' . $filename),
             public_path('storage/users/' . $filename),
             public_path('uploads/' . $filename),
             public_path('images/' . $filename),
+            storage_path('app/public/' . $filename),
+            public_path('storage/' . $filename),
         ];
 
         foreach ($candidates as $path) {

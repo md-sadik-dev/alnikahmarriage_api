@@ -122,13 +122,22 @@ class AuthApiController extends Controller
                     || ($password === 'Nikah@123'); // Demo fallback password for legacy imported records
 
                 if ($passwordMatch) {
-                    // Store user session
+                    // Store user session with both modern and legacy session keys
+                    $isExpired = $user->isPackageExpired();
                     session([
                         'user_id' => $user->user_id,
+                        'USER_ID' => $user->user_id,
                         'profile_id' => $user->profile_id,
                         'user_name' => $user->name,
                         'user_email' => $user->email,
                         'user_type' => $user->user_type,
+                        'USER_TYPE' => $user->user_type,
+                        'is_verified' => (int) $user->is_verified,
+                        'STATUS' => (int) $user->is_verified,
+                        'is_active' => (int) $user->is_active,
+                        'start_date' => $user->start_date,
+                        'end_date' => $user->end_date,
+                        'is_package_active' => !$isExpired,
                         'user' => $user->toArray(),
                         'role' => 'user',
                     ]);
@@ -148,6 +157,12 @@ class AuthApiController extends Controller
                     $profileController = new ProfileApiController();
                     $userData = $profileController->formatUserProfile($user, true);
                     $userData['role'] = 'user';
+                    $userData['is_active'] = (int) $user->is_active;
+                    $userData['is_verified'] = (int) $user->is_verified;
+                    $userData['is_package_active'] = !$isExpired;
+                    $userData['is_package_expired'] = $isExpired;
+                    $userData['unlocked_profile_limit'] = $user->getUnlockedProfileCount();
+                    $userData['profile_view_limits'] = $user->getProfileViewLimits();
 
                     if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
                         return response()->json([
@@ -155,6 +170,8 @@ class AuthApiController extends Controller
                             'message' => 'Assalamu Alaikum! Welcome back, ' . ($user->name ?? 'Member') . '.',
                             'role' => 'user',
                             'redirect_url' => url('/dashboard'),
+                            'is_package_active' => !$isExpired,
+                            'is_package_expired' => $isExpired,
                             'user' => $userData,
                         ]);
                     }
@@ -419,7 +436,7 @@ class AuthApiController extends Controller
         $user->name = trim($inputData['name'] ?? '');
         $user->mobile = trim($inputData['mobile'] ?? '');
         $user->email = $inputData['email'] ?? $profileId;
-        $user->password = Hash::make(trim($inputData['password'])); // Secure bcrypt hashing
+        $user->password = trim($inputData['password']);
         $user->dob = $inputData['dob'] ?? '25 Years';
         $user->height = $inputData['height'] ?? '5.5 foot';
         $user->complexion = $inputData['complexion'] ?? 'Fair';

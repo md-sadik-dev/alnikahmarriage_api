@@ -39,6 +39,7 @@ Route::prefix('profiles')->group(function () {
     Route::get('/', [ProfileApiController::class, 'index'])->name('api.profiles.index');
     Route::get('/featured', [ProfileApiController::class, 'featured'])->name('api.profiles.featured');
     Route::get('/{id}', [ProfileApiController::class, 'show'])->name('api.profiles.show');
+    Route::post('/{id}/unlock', [ProfileApiController::class, 'unlockProfile'])->name('api.profiles.unlock');
 });
 
 use App\Http\Controllers\Api\InterestApiController;
