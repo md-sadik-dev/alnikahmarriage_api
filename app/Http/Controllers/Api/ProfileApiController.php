@@ -35,11 +35,10 @@ class ProfileApiController extends Controller
         $viewer = $this->resolveViewer($request);
         $query = User::query();
 
-        // Base criteria: is_deleted = 0, is_active = 1, is_verified = 1
+        // Base criteria: is_deleted = 0, is_verified = 1 (matching old core PHP getAllProfile)
         $query->where(function ($q) {
             $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
         });
-        $query->where('is_active', 1);
         $query->where('is_verified', 1);
 
         // RULE 1: Opposite Gender Rule & Exclude Self
@@ -68,24 +67,27 @@ class ProfileApiController extends Controller
                 });
             }
 
-            // RULE 3: Marital Status & Age Matching Rule (getMaritalStatusMatchingCondition)
-            $userAge = $viewer->calculateAge();
-            $userMarital = strtolower(trim($viewer->marital_status ?? ''));
-            if ($userAge >= 40) {
-                // Rule A: Age >= 40 -> Regardless of marital status, only Divorced or Khula match
-                $query->where(function ($q) {
-                    $q->whereRaw("(LOWER(marital_status) LIKE '%divor%' OR LOWER(marital_status) LIKE '%khul%')");
-                });
-            } else {
-                // Rule B: Age < 40
-                if (str_contains($userMarital, 'unmarri') || $userMarital === 'single' || str_contains($userMarital, 'never marri')) {
-                    $query->where(function ($q) {
-                        $q->whereRaw("(LOWER(marital_status) LIKE '%unmarri%' OR LOWER(marital_status) = 'single' OR LOWER(marital_status) LIKE '%never marri%')");
-                    });
-                } elseif (str_contains($userMarital, 'divor') || str_contains($userMarital, 'khul')) {
+            // RULE 3: Marital Status & Age Matching Rule (Applied when user has NOT explicitly filtered by marital status)
+            $hasExplicitStatusFilter = $request->filled('marital_status') || $request->filled('status') || $request->filled('maritalStatus');
+            if (!$hasExplicitStatusFilter) {
+                $userAge = $viewer->calculateAge();
+                $userMarital = strtolower(trim($viewer->marital_status ?? ''));
+                if ($userAge >= 40) {
+                    // Rule A: Age >= 40 -> Regardless of marital status, only Divorced or Khula match
                     $query->where(function ($q) {
                         $q->whereRaw("(LOWER(marital_status) LIKE '%divor%' OR LOWER(marital_status) LIKE '%khul%')");
                     });
+                } else {
+                    // Rule B: Age < 40
+                    if (str_contains($userMarital, 'unmarri') || $userMarital === 'single' || str_contains($userMarital, 'never marri')) {
+                        $query->where(function ($q) {
+                            $q->whereRaw("(LOWER(marital_status) LIKE '%unmarri%' OR LOWER(marital_status) = 'single' OR LOWER(marital_status) LIKE '%never marri%')");
+                        });
+                    } elseif (str_contains($userMarital, 'divor') || str_contains($userMarital, 'khul')) {
+                        $query->where(function ($q) {
+                            $q->whereRaw("(LOWER(marital_status) LIKE '%divor%' OR LOWER(marital_status) LIKE '%khul%')");
+                        });
+                    }
                 }
             }
         } else {
@@ -98,35 +100,82 @@ class ProfileApiController extends Controller
             }
         }
 
-        // RULE 5: Additional Search & Filter Form Inputs
-        // Firqa / Sect filter
-        if ($request->filled('firqa') || $request->filled('sect')) {
-            $sect = trim($request->input('firqa', $request->input('sect')));
-            if ($sect !== 'All' && !empty($sect)) {
-                $query->where('sect', 'LIKE', "%{$sect}%");
-            }
-        }
+        $isSearch = $request->boolean('is_search')
+            || $request->filled('firqa')
+            || $request->filled('religion')
+            || $request->filled('sect')
+            || $request->filled('maslak')
+            || $request->filled('caste')
+            || $request->filled('status')
+            || $request->filled('marital_status')
+            || $request->filled('maritalStatus')
+            || $request->filled('city')
+            || $request->filled('search')
+            || $request->filled('q');
 
-        // Maslak filter
-        if ($request->filled('maslak')) {
-            $maslak = trim($request->input('maslak'));
-            if ($maslak !== 'All' && !empty($maslak)) {
-                $query->where(function ($q) use ($maslak) {
-                    $q->where('religion', 'LIKE', "%{$maslak}%")
-                      ->orWhere('sect', 'LIKE', "%{$maslak}%");
+
+        // RULE 5 / Step 3: Additional Search & Filter Form Inputs
+        // Firqa / Religion filter (users.religion)
+        if ($request->filled('firqa') || $request->filled('religion')) {
+            $firqa = trim($request->input('firqa', $request->input('religion')));
+            if ($firqa !== 'All' && !empty($firqa)) {
+                $query->where(function ($q) use ($firqa) {
+                    $q->where('religion', 'LIKE', "%{$firqa}%")
+                      ->orWhere('sect', 'LIKE', "%{$firqa}%");
                 });
             }
         }
 
-        // Caste filter
-        if ($request->filled('caste')) {
-            $caste = trim($request->input('caste'));
-            if ($caste !== 'All' && !empty($caste)) {
-                $query->where('caste', 'LIKE', "%{$caste}%");
+        // Maslak / Sect filter (users.sect) with spelling variants normalization
+        if ($request->filled('maslak') || $request->filled('sect')) {
+            $maslak = trim($request->input('maslak', $request->input('sect')));
+            if ($maslak !== 'All' && !empty($maslak)) {
+                $maslakLower = strtolower($maslak);
+                $query->where(function ($q) use ($maslak, $maslakLower) {
+                    if (str_contains($maslakLower, 'barelv') || str_contains($maslakLower, 'baralv')) {
+                        $q->where('sect', 'LIKE', '%baral%')
+                          ->orWhere('sect', 'LIKE', '%barel%');
+                    } elseif (str_contains($maslakLower, 'deoband') || str_contains($maslakLower, 'devband')) {
+                        $q->where('sect', 'LIKE', '%devb%')
+                          ->orWhere('sect', 'LIKE', '%deob%');
+                    } elseif (str_contains($maslakLower, 'salafi') || str_contains($maslakLower, 'hadees') || str_contains($maslakLower, 'hadish')) {
+                        $q->where('sect', 'LIKE', '%salafi%')
+                          ->orWhere('sect', 'LIKE', '%hadees%')
+                          ->orWhere('sect', 'LIKE', '%hadish%');
+                    } elseif (str_contains($maslakLower, 'hanafi') || str_contains($maslakLower, 'hanfi')) {
+                        $q->where('sect', 'LIKE', '%hanfi%')
+                          ->orWhere('sect', 'LIKE', '%hanafi%')
+                          ->orWhere('sect', 'LIKE', '%sunni%');
+                    } else {
+                        $q->where('sect', 'LIKE', "%{$maslak}%")
+                          ->orWhere('religion', 'LIKE', "%{$maslak}%");
+                    }
+                });
             }
         }
 
-        // City filter
+        // Caste filter (users.caste) with spelling variants normalization
+        if ($request->filled('caste')) {
+            $caste = trim($request->input('caste'));
+            if ($caste !== 'All' && !empty($caste)) {
+                $casteLower = strtolower($caste);
+                $query->where(function ($q) use ($caste, $casteLower) {
+                    if (str_contains($casteLower, 'quresh') || str_contains($casteLower, 'qurash')) {
+                        $q->where('caste', 'LIKE', '%qur%');
+                    } elseif (str_contains($casteLower, 'sheikh') || str_contains($casteLower, 'shaikh')) {
+                        $q->where('caste', 'LIKE', '%sheikh%')
+                          ->orWhere('caste', 'LIKE', '%shaikh%');
+                    } elseif (str_contains($casteLower, 'pathan') || str_contains($casteLower, 'khan')) {
+                        $q->where('caste', 'LIKE', '%pathan%')
+                          ->orWhere('caste', 'LIKE', '%khan%');
+                    } else {
+                        $q->where('caste', 'LIKE', "%{$caste}%");
+                    }
+                });
+            }
+        }
+
+        // City filter (users.n_address, address, prefered_location)
         if ($request->filled('city')) {
             $city = trim($request->input('city'));
             if ($city !== 'All' && !empty($city)) {
@@ -138,11 +187,24 @@ class ProfileApiController extends Controller
             }
         }
 
-        // Marital Status explicit filter
-        if ($request->filled('marital_status') || $request->filled('status')) {
-            $status = trim($request->input('marital_status', $request->input('status')));
-            if ($status !== 'All' && !empty($status)) {
-                $query->where('marital_status', 'LIKE', "%{$status}%");
+        // Marital Status explicit filter (users.marital_status) for both logged-in and guest users
+        if ($request->filled('marital_status') || $request->filled('status') || $request->filled('maritalStatus')) {
+            $statusInput = trim($request->input('marital_status', $request->input('status', $request->input('maritalStatus'))));
+            if ($statusInput !== 'All' && !empty($statusInput)) {
+                $statusLower = strtolower($statusInput);
+                $query->where(function ($q) use ($statusInput, $statusLower) {
+                    if (str_contains($statusLower, 'never') || str_contains($statusLower, 'unmarr') || $statusLower === 'single') {
+                        $q->whereRaw("(LOWER(marital_status) LIKE '%unmarr%' OR LOWER(marital_status) = 'single' OR LOWER(marital_status) LIKE '%never marri%')");
+                    } elseif (str_contains($statusLower, 'divorc') || str_contains($statusLower, 'khul')) {
+                        $q->whereRaw("(LOWER(marital_status) LIKE '%divor%' OR LOWER(marital_status) LIKE '%khul%')");
+                    } elseif (str_contains($statusLower, 'widow')) {
+                        $q->whereRaw("(LOWER(marital_status) LIKE '%widow%')");
+                    } elseif (str_contains($statusLower, 'separat')) {
+                        $q->whereRaw("(LOWER(marital_status) LIKE '%separat%')");
+                    } else {
+                        $q->where('marital_status', 'LIKE', "%{$statusInput}%");
+                    }
+                });
             }
         }
 
@@ -166,8 +228,19 @@ class ProfileApiController extends Controller
         $unlockedProfileCount = $viewer ? $viewer->getUnlockedProfileCount() : 20;
         $daysSinceStart = $viewer ? max(1, (int) ($unlockedProfileCount / 2)) : 1;
 
-        $limit = (int) $request->input('limit', 20);
-        $limit = ($limit > 100 || $limit < 1) ? 20 : $limit;
+        // Dynamic limit matching old core PHP: default to user's unlocked progression limit (Days * 2)
+        if ($request->filled('limit')) {
+            $limit = (int) $request->input('limit');
+            if ($limit <= 0) {
+                $limit = $viewer ? $unlockedProfileCount : 20;
+            } else {
+                $maxAllowed = $viewer ? max($unlockedProfileCount, 500) : 100;
+                $limit = min($limit, $maxAllowed);
+            }
+        } else {
+            // When no limit is passed, default to user's daily progression quota (e.g. 214 for Liaqat, 262 for Farzana)
+            $limit = $viewer ? $unlockedProfileCount : 20;
+        }
 
         // Apply daily progression limit if requested or feed mode
         if ($request->boolean('daily_limit') || $request->input('mode') === 'daily') {
@@ -384,16 +457,7 @@ class ProfileApiController extends Controller
             ]);
         }
 
-        // Check 1: User's package expired?
-        if ($viewer->isPackageExpired()) {
-            return response()->json([
-                'success' => false,
-                'view_status' => 'package_expired',
-                'message' => 'Your membership package has expired. Please renew your package to view candidate contact details.',
-            ], 403);
-        }
-
-        // Check 2: Has this profile already been viewed by the logged-in user?
+        // Check 1: Has this profile already been viewed by the logged-in user? (Always accessible even if package expired)
         if ($viewer->hasViewedProfile($user->user_id)) {
             return response()->json([
                 'success' => true,
@@ -401,6 +465,15 @@ class ProfileApiController extends Controller
                 'message' => 'Candidate contact details already unlocked.',
                 'data' => $this->formatUserProfile($user, true, $viewer, $request),
             ]);
+        }
+
+        // Check 2: User's package expired? (Blocks unlocking NEW unviewed profiles)
+        if ($viewer->isPackageExpired()) {
+            return response()->json([
+                'success' => false,
+                'view_status' => 'package_expired',
+                'message' => 'Your membership package has expired. Please renew your package to view candidate contact details.',
+            ], 403);
         }
 
         // Check 3: Check package view limits in profile_view_limits table
@@ -596,18 +669,18 @@ class ProfileApiController extends Controller
             $usedLimit = $limits ? (int) $limits->use_package_profile_limit : 0;
             $remainingLimit = max(0, $pkgLimit - $usedLimit);
 
-            if ($viewer->isPackageExpired()) {
-                // Expired subscriber: blurry photo & locked contacts
-                $isBlurred = true;
-                $canViewContact = false;
-                $viewStatus = 'package_expired';
-            } elseif ($hasViewed) {
-                // Already viewed & recorded in profile_views table: unblurred & full contacts
+            if ($hasViewed) {
+                // Already viewed & recorded in profile_views table: unblurred & full contacts permanently unlocked
                 $isBlurred = false;
                 $canViewContact = true;
                 $viewStatus = 'viewed';
+            } elseif ($viewer->isPackageExpired()) {
+                // Expired subscriber: candidate cards on dashboard/recommendations shown without blur (matching old core PHP), but contacts locked
+                $isBlurred = false;
+                $canViewContact = false;
+                $viewStatus = 'package_expired';
             } else {
-                // Active subscriber: unblurred photo, but candidate phone/address locked until view quota deducted
+                // Active subscriber viewing an unviewed profile: unblurred photo, but candidate phone/address locked until view quota deducted
                 $isBlurred = false;
                 $canViewContact = false;
                 $viewStatus = ($usedLimit >= $pkgLimit) ? 'limit_reached_package' : 'unlockable';
@@ -684,7 +757,7 @@ class ProfileApiController extends Controller
                 // Return crisp original photo endpoint
                 $localPath = $resolveLocalPhoto($user->profile_pic);
                 if ($localPath) {
-                    $imageUrl = asset('storage/users/' . $user->profile_pic);
+                    $imageUrl = $checkPhoto($user->profile_pic) ?: asset('storage/users/' . $user->profile_pic);
                     $photoStreamUrl = url('/api/photo/' . rawurlencode($user->profile_pic));
                     $mime = @mime_content_type($localPath) ?: 'image/jpeg';
                     $fileBytes = @file_get_contents($localPath);
@@ -1297,48 +1370,13 @@ class ProfileApiController extends Controller
 
         $filename = basename($filename);
 
-        // Determine profile owner for this photo
-        $ownerUser = User::where('profile_pic', $filename)
-            ->orWhere('profile_pic1', $filename)
-            ->first();
-
-        if (!$ownerUser) {
-            $dbImg = \Illuminate\Support\Facades\DB::table('users_images')
-                ->where('images', $filename)
-                ->first();
-            if ($dbImg) {
-                $ownerUser = User::where('user_id', $dbImg->user_id)->first();
-            }
-        }
-
-        if ($ownerUser) {
-            $viewer = $this->resolveViewer($request);
-            $isSelf = ($viewer && $viewer->user_id == $ownerUser->user_id);
-            $targetHasPaid = $ownerUser->hasActivePaidPackage();
-            $viewerHasPaid = $viewer ? $viewer->hasActivePaidPackage() : false;
-            $isWithin3Days = $ownerUser->isWithin3DayTrial();
-
-            $shouldBlur = true;
-            if ($isSelf) {
-                $shouldBlur = false;
-            } elseif ($viewerHasPaid) {
-                if ($targetHasPaid) {
-                    $shouldBlur = false;
-                } elseif ($isWithin3Days) {
-                    $shouldBlur = false;
-                }
-            }
-
-            if ($shouldBlur) {
-                return $this->getBlurredPhoto($filename);
-            }
-        }
-
         $candidates = [
             storage_path('app/public/users/' . $filename),
             public_path('storage/users/' . $filename),
             public_path('uploads/' . $filename),
             public_path('images/' . $filename),
+            storage_path('app/public/' . $filename),
+            public_path('storage/' . $filename),
         ];
 
         foreach ($candidates as $path) {
