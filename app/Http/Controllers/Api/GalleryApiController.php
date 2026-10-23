@@ -28,16 +28,18 @@ class GalleryApiController extends Controller
 
         // Ordering (latest first by default)
         $sortBy = $request->input('sort_by', 'id');
-        $sortOrder = strtolower($request->input('sort_order', 'asc')) === 'desc' ? 'desc' : 'asc';
+        $sortOrder = strtolower($request->input('sort_order', 'desc')) === 'asc' ? 'asc' : 'desc';
         $query->orderBy($sortBy, $sortOrder);
 
         // Fetch all or paginate
         $limit = $request->input('limit');
         if ($limit) {
             $items = $query->paginate((int) $limit);
-            $items->getCollection()->transform(function ($item, $index) {
+            $formatted = $items->getCollection()->map(function ($item, $index) {
                 return $this->formatGalleryItem($item, $index);
-            });
+            })->filter()->values();
+            $items->setCollection($formatted);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Gallery fetched successfully.',
@@ -47,7 +49,7 @@ class GalleryApiController extends Controller
 
         $galleries = $query->get()->map(function ($item, $index) {
             return $this->formatGalleryItem($item, $index);
-        });
+        })->filter()->values();
 
         return response()->json([
             'success' => true,
@@ -74,38 +76,53 @@ class GalleryApiController extends Controller
             ], 404);
         }
 
+        $formatted = $this->formatGalleryItem($item, 0);
+        if (!$formatted) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gallery photo image not found.',
+            ], 404);
+        }
+
         return response()->json([
             'success' => true,
-            'data' => $this->formatGalleryItem($item, 0),
+            'data' => $formatted,
         ]);
     }
 
     /**
      * Format gallery item with full URLs and accessible metadata.
+     * Only returns item if the uploaded file exists. No hardcoded/static fallbacks.
      *
      * @param Gallery $item
      * @param int $index
-     * @return array
+     * @return array|null
      */
-    protected function formatGalleryItem($item, $index = 0): array
+    protected function formatGalleryItem($item, $index = 0): ?array
     {
         $imageName = $item->image;
         $imageUrl = '';
 
-        // Check if image file exists in public directories
-        if (!empty($imageName) && file_exists(public_path('uploads/' . $imageName))) {
-            $imageUrl = url('uploads/' . $imageName);
-        } elseif (!empty($imageName) && file_exists(public_path('images/' . $imageName))) {
-            $imageUrl = url('images/' . $imageName);
-        } else {
-            // Fallback to webp success stories assets in public/images
-            $fallbackIndex = ($index % 14) + 1;
-            $webpName = 'success-stories-' . $fallbackIndex . '.webp';
-            if (file_exists(public_path('images/' . $webpName))) {
-                $imageUrl = url('images/' . $webpName);
-            } else {
-                $imageUrl = url('images/' . ($imageName ?: 'hero-1.webp'));
+        if (!empty($imageName)) {
+            // Check public/uploads/gallery/
+            if (file_exists(public_path('uploads/gallery/' . $imageName))) {
+                $imageUrl = url('uploads/gallery/' . rawurlencode($imageName));
+            } elseif (file_exists(base_path('../uploads/gallery/' . $imageName))) {
+                // Auto-sync from root uploads/gallery if present
+                $pubGalleryDir = public_path('uploads/gallery');
+                if (!file_exists($pubGalleryDir)) {
+                    @mkdir($pubGalleryDir, 0777, true);
+                }
+                @copy(base_path('../uploads/gallery/' . $imageName), $pubGalleryDir . '/' . $imageName);
+                if (file_exists($pubGalleryDir . '/' . $imageName)) {
+                    $imageUrl = url('uploads/gallery/' . rawurlencode($imageName));
+                }
             }
+        }
+
+        // Agar gallery image nahi hoga toh kuch show nahi karna hai
+        if (empty($imageUrl)) {
+            return null;
         }
 
         // Clean title from image filename

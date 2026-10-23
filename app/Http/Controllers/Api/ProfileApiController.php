@@ -101,28 +101,32 @@ class ProfileApiController extends Controller
         $limit = (int) $request->input('limit', 20);
         $limit = ($limit > 100 || $limit < 1) ? 20 : $limit;
 
+        $viewer = $this->resolveViewer($request);
+
         if ($request->boolean('paginate', false)) {
             $paginator = $query->paginate($limit);
-            $transformed = $paginator->getCollection()->map(function ($user) {
-                return $this->formatUserProfile($user);
+            $transformed = $paginator->getCollection()->map(function ($user) use ($viewer, $request) {
+                return $this->formatUserProfile($user, false, $viewer, $request);
             });
             $paginator->setCollection($transformed);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Profiles retrieved successfully.',
+                'viewer_has_package' => $viewer ? $viewer->hasActivePaidPackage() : false,
                 'data' => $paginator,
             ]);
         }
 
         $users = $query->take($limit)->get();
-        $formatted = $users->map(function ($user) {
-            return $this->formatUserProfile($user);
+        $formatted = $users->map(function ($user) use ($viewer, $request) {
+            return $this->formatUserProfile($user, false, $viewer, $request);
         });
 
         return response()->json([
             'success' => true,
             'message' => 'Profiles retrieved successfully.',
+            'viewer_has_package' => $viewer ? $viewer->hasActivePaidPackage() : false,
             'count' => $formatted->count(),
             'data' => $formatted,
         ]);
@@ -159,13 +163,16 @@ class ProfileApiController extends Controller
             ->take($limitEach)
             ->get();
 
-        $combined = $grooms->concat($brides)->map(function ($user) {
-            return $this->formatUserProfile($user);
+        $viewer = $this->resolveViewer($request);
+
+        $combined = $grooms->concat($brides)->map(function ($user) use ($viewer, $request) {
+            return $this->formatUserProfile($user, false, $viewer, $request);
         });
 
         return response()->json([
             'success' => true,
             'message' => 'Featured profiles retrieved successfully.',
+            'viewer_has_package' => $viewer ? $viewer->hasActivePaidPackage() : false,
             'total' => $combined->count(),
             'grooms_count' => $grooms->count(),
             'brides_count' => $brides->count(),
@@ -176,10 +183,11 @@ class ProfileApiController extends Controller
     /**
      * Get single profile by ID or Profile Code.
      *
+     * @param Request $request
      * @param string|int $id
      * @return JsonResponse
      */
-    public function show($id): JsonResponse
+    public function show(Request $request, $id): JsonResponse
     {
         $user = User::where('user_id', $id)
             ->orWhere('profile_id', $id)
@@ -192,22 +200,173 @@ class ProfileApiController extends Controller
             ], 404);
         }
 
+        $viewer = $this->resolveViewer($request);
+
         return response()->json([
             'success' => true,
             'message' => 'Profile details retrieved successfully.',
-            'data' => $this->formatUserProfile($user, true),
+            'viewer_has_package' => $viewer ? $viewer->hasActivePaidPackage() : false,
+            'data' => $this->formatUserProfile($user, true, $viewer, $request),
         ]);
     }
 
     /**
-     * Helper to transform a User model into standardized Profile format.
+     * Helper to resolve the viewing user (viewer) from request context.
+     *
+     * @param Request|null $request
+     * @return User|null
+     */
+    public function resolveViewer(?Request $request = null): ?User
+    {
+        $req = $request ?: request();
+
+        // 1. Authenticated member attribute from middleware
+        $member = $req->attributes->get('authenticated_member');
+        if ($member instanceof User) {
+            return $member;
+        }
+
+        // 2. Laravel Auth facade
+        if (\Illuminate\Support\Facades\Auth::check()) {
+            $user = \Illuminate\Support\Facades\Auth::user();
+            if ($user instanceof User) {
+                return $user;
+            }
+        }
+
+        // 3. Active Session user_id
+        $userId = session('user_id');
+        if ($userId) {
+            $user = User::where('user_id', $userId)
+                ->where(function ($q) {
+                    $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                })
+                ->first();
+            if ($user) {
+                return $user;
+            }
+        }
+
+        // 4. Custom X-User-Id header for headless client communication
+        if ($req->hasHeader('X-User-Id')) {
+            $hdrId = (int) $req->header('X-User-Id');
+            if ($hdrId > 0) {
+                $user = User::where('user_id', $hdrId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+                if ($user) {
+                    return $user;
+                }
+            }
+        }
+
+        // 5. Query param viewer_id (for direct image / API links)
+        if ($req->filled('viewer_id')) {
+            $vId = (int) $req->input('viewer_id');
+            if ($vId > 0) {
+                return User::where('user_id', $vId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Mask candidate full name for blurred/unauthorized visibility.
+     * Example: "DARAKHSHAN ANJUM" -> "D********* A****"
+     *
+     * @param string|null $name
+     * @return string
+     */
+    public function maskName(?string $name): string
+    {
+        $name = trim($name ?? '');
+        if (empty($name)) {
+            return 'Confidential Member';
+        }
+
+        $words = preg_split('/\s+/', $name);
+        $maskedWords = [];
+
+        foreach ($words as $word) {
+            $len = mb_strlen($word);
+            if ($len <= 2) {
+                $maskedWords[] = mb_substr($word, 0, 1) . '*';
+            } elseif ($len <= 4) {
+                $maskedWords[] = mb_substr($word, 0, 1) . str_repeat('*', $len - 1);
+            } else {
+                $maskedWords[] = mb_substr($word, 0, 1) . str_repeat('*', min(6, $len - 1));
+            }
+        }
+
+        return implode(' ', $maskedWords);
+    }
+
+    /**
+     * Helper to transform a User model into standardized Profile format
+     * enforcing 3-day registration window and payment-based blur/contact rules.
      *
      * @param User $user
      * @param bool $detailed
+     * @param User|null $viewerUser
+     * @param Request|null $request
      * @return array
      */
-    public function formatUserProfile($user, bool $detailed = false): array
+    public function formatUserProfile($user, bool $detailed = false, $viewerUser = null, ?Request $request = null): array
     {
+        $viewer = $viewerUser ?: $this->resolveViewer($request ?: request());
+        $isSelf = ($viewer && $viewer->user_id == $user->user_id);
+
+        $targetHasPaid = $user->hasActivePaidPackage();
+        $viewerHasPaid = $viewer ? $viewer->hasActivePaidPackage() : false;
+
+        $daysSinceRegistration = $user->daysSinceRegistration();
+        $isWithin3Days = $user->isWithin3DayTrial();
+
+        // -------------------------------------------------------------
+        // ACCESS CONTROL DECISION ENGINE:
+        // -------------------------------------------------------------
+        // 1. Self viewing own profile -> Full unblurred access & full contacts
+        // 2. Target has NOT paid:
+        //    - First 3 days: other users see blurred photo & name, hidden contacts
+        //    - After 3 days without payment: remains blurred, hidden contacts
+        // 3. Target HAS paid & activated:
+        //    - Visible unblurred ONLY to users with active eligible package
+        //    - Contacts visible ONLY to users with active package granting contact access
+        // 4. Viewer has NOT purchased a package:
+        //    - Always sees blurred photo & name, hidden contacts
+        // -------------------------------------------------------------
+        if ($isSelf) {
+            $isBlurred = false;
+            $canViewContact = true;
+        } else {
+            if (!$viewerHasPaid) {
+                // Any viewer without an active paid package ALWAYS sees blurred name/photo & hidden contacts
+                $isBlurred = true;
+                $canViewContact = false;
+            } else {
+                // Viewing user HAS an active paid package (eligible viewer)
+                if ($targetHasPaid) {
+                    // Both have paid: fully visible unblurred & contacts unlocked
+                    $isBlurred = false;
+                    $canViewContact = true;
+                } else {
+                    // Target has NOT purchased a package:
+                    // During first 3 days of signup: eligible paid viewers can view photo & name unblurred
+                    // After 3 days without payment: remains blurred until target package is purchased & activated
+                    // Mobile and address must strictly remain hidden while target is unpaid
+                    $isBlurred = $isWithin3Days ? false : true;
+                    $canViewContact = false;
+                }
+            }
+        }
+
         $isGroom = strtoupper(trim($user->user_type ?? '')) === 'GROOM';
         $genderTitle = $isGroom ? 'Groom' : 'Bride';
         $badgeClass = $isGroom ? 'badge-groom' : 'badge-bride';
@@ -219,7 +378,24 @@ class ProfileApiController extends Controller
             $profileId = $prefix . $user->user_id;
         }
 
-        // Helper to find file in storage/users, public/storage, uploads, or images
+        // Helper to locate physical file on server
+        $resolveLocalPhoto = function ($filename) {
+            if (empty($filename)) return null;
+            $candidates = [
+                storage_path('app/public/users/' . $filename),
+                public_path('storage/users/' . $filename),
+                public_path('uploads/' . $filename),
+                public_path('images/' . $filename),
+            ];
+            foreach ($candidates as $cand) {
+                if (file_exists($cand) && is_file($cand)) {
+                    return $cand;
+                }
+            }
+            return null;
+        };
+
+        // Helper to find web path
         $checkPhoto = function ($filename) {
             if (empty($filename)) return null;
             if (file_exists(public_path('storage/users/' . $filename))) {
@@ -240,46 +416,62 @@ class ProfileApiController extends Controller
             return null;
         };
 
-        // Helper to locate physical file on server
-        $resolveLocalPhoto = function ($filename) {
-            if (empty($filename)) return null;
-            $candidates = [
-                storage_path('app/public/users/' . $filename),
-                public_path('storage/users/' . $filename),
-                public_path('uploads/' . $filename),
-                public_path('images/' . $filename),
-            ];
-            foreach ($candidates as $cand) {
-                if (file_exists($cand) && is_file($cand)) {
-                    return $cand;
-                }
-            }
-            return null;
-        };
-
-        // Compute dynamic image URLs and Base64 representation for seamless CORS-free PDF export
+        // Image URL and Stream resolution
         $base64Photo = null;
         $imageUrl = null;
         $photoStreamUrl = null;
+        $allImages = [];
 
         if (!empty($user->profile_pic)) {
-            $localPath = $resolveLocalPhoto($user->profile_pic);
-            if ($localPath) {
-                $imageUrl = asset('storage/users/' . $user->profile_pic);
-                $photoStreamUrl = url('/api/photo/' . $user->profile_pic);
-                $mime = @mime_content_type($localPath) ?: 'image/jpeg';
-                $fileBytes = @file_get_contents($localPath);
-                if ($fileBytes) {
-                    $base64Photo = 'data:' . $mime . ';base64,' . base64_encode($fileBytes);
-                }
+            if ($isBlurred) {
+                // Return server-side blurred photo endpoint
+                $imageUrl = url('/api/photo/blurred/' . rawurlencode($user->profile_pic));
+                $photoStreamUrl = $imageUrl;
+                $allImages[] = $imageUrl;
             } else {
-                $imageUrl = $checkPhoto($user->profile_pic);
+                // Return crisp original photo endpoint
+                $localPath = $resolveLocalPhoto($user->profile_pic);
+                if ($localPath) {
+                    $imageUrl = asset('storage/users/' . $user->profile_pic);
+                    $photoStreamUrl = url('/api/photo/' . rawurlencode($user->profile_pic));
+                    $mime = @mime_content_type($localPath) ?: 'image/jpeg';
+                    $fileBytes = @file_get_contents($localPath);
+                    if ($fileBytes) {
+                        $base64Photo = 'data:' . $mime . ';base64,' . base64_encode($fileBytes);
+                    }
+                } else {
+                    $imageUrl = $checkPhoto($user->profile_pic);
+                    $photoStreamUrl = $imageUrl ? url('/api/photo/' . rawurlencode($user->profile_pic)) : null;
+                }
+
+                if ($imageUrl) {
+                    $allImages[] = $imageUrl;
+                }
+
+                // Add secondary images only if unblurred
+                $dbImages = \Illuminate\Support\Facades\DB::table('users_images')
+                    ->where('user_id', $user->user_id)
+                    ->where('is_active', 1)
+                    ->get();
+
+                foreach ($dbImages as $row) {
+                    $path = $checkPhoto($row->images);
+                    if ($path && !in_array($path, $allImages)) {
+                        $allImages[] = $path;
+                    }
+                }
+
+                if (!empty($user->profile_pic1)) {
+                    $pic1 = $checkPhoto($user->profile_pic1);
+                    if ($pic1 && !in_array($pic1, $allImages)) {
+                        $allImages[] = $pic1;
+                    }
+                }
             }
         }
 
         // Format City
         $city = !empty($user->n_address) ? trim($user->n_address) : (!empty($user->address) ? trim($user->address) : 'Not Specified');
-        // Clean up newlines or extra spaces in city
         $city = preg_replace('/\s+/', ' ', $city);
         $displayCity = (strlen($city) > 40) ? substr($city, 0, 37) . '...' : $city;
 
@@ -299,36 +491,21 @@ class ProfileApiController extends Controller
             $maslak = trim($user->religion);
         }
 
-        // Fetch real uploaded images for this user
-        $allImages = [];
-        if ($imageUrl) {
-            $allImages[] = $imageUrl;
-        }
+        // Display Name: masked if blurred, full if unblurred
+        $displayName = $isBlurred ? $this->maskName($user->name) : ($user->name ?? '');
 
-        // Fetch additional images from users_images table
-        $dbImages = \Illuminate\Support\Facades\DB::table('users_images')
-            ->where('user_id', $user->user_id)
-            ->where('is_active', 1)
-            ->get();
-
-        foreach ($dbImages as $row) {
-            $path = $checkPhoto($row->images);
-            if ($path && !in_array($path, $allImages)) {
-                $allImages[] = $path;
-            }
-        }
-
-        if (!empty($user->profile_pic1)) {
-            $pic1 = $checkPhoto($user->profile_pic1);
-            if ($pic1 && !in_array($pic1, $allImages)) {
-                $allImages[] = $pic1;
-            }
-        }
+        // Contact info: masked/null if not authorized
+        $mobileVal = $canViewContact ? (!empty(trim($user->mobile ?? '')) ? trim($user->mobile) : '') : null;
+        $altMobileVal = $canViewContact ? (!empty(trim($user->alternate_mobile ?? '')) ? trim($user->alternate_mobile) : '') : null;
+        $contactNumberVal = $canViewContact ? ($mobileVal ?: $altMobileVal) : null;
+        $emailVal = $canViewContact ? (!empty(trim($user->email ?? '')) ? trim($user->email) : '') : null;
+        $addressVal = $canViewContact ? (!empty(trim($user->address ?? '')) ? trim($user->address) : $displayCity) : null;
+        $nAddressVal = $canViewContact ? (!empty(trim($user->n_address ?? '')) ? trim($user->n_address) : '') : null;
 
         $data = [
             'id' => $user->user_id,
             'profile_id' => $profileId,
-            'name' => $user->name ?? 'Confidential',
+            'name' => $displayName,
             'user_type' => $user->user_type ?? ($isGroom ? 'GROOM' : 'BRIDE'),
             'gender' => $genderTitle,
             'gender_badge' => $genderTitle,
@@ -339,35 +516,71 @@ class ProfileApiController extends Controller
             'photo_stream_url' => $photoStreamUrl,
             'images' => $allImages,
             'images_count' => count($allImages),
-            'education' => !empty($user->qualification) ? trim($user->qualification) : 'Graduate',
-            'profession' => !empty($user->work) ? trim($user->work) : 'Business / Service',
-            'age_dob' => !empty($user->dob) ? trim($user->dob) : '28 Years',
+            
+            // Access control and visibility flags
+            'is_blurred' => $isBlurred,
+            'is_name_blurred' => $isBlurred,
+            'is_photo_blurred' => $isBlurred,
+            'can_view_contact' => $canViewContact,
+            'contact_locked' => !$canViewContact,
+            'contact_locked_message' => !$canViewContact ? 'Mobile number and address are protected. Please purchase an active membership package to view contact details.' : '',
+            'target_has_paid_package' => $targetHasPaid,
+            'viewer_has_paid_package' => $viewerHasPaid,
+            'days_since_registration' => $daysSinceRegistration,
+            'is_within_3_days' => $isWithin3Days,
+            'membership_status' => $targetHasPaid ? 'PAID_ACTIVE' : ($isWithin3Days ? 'TRIAL_ACTIVE' : 'TRIAL_EXPIRED'),
+            'viewer_status' => $viewerHasPaid ? 'PAID_MEMBER' : ($viewer ? 'FREE_MEMBER' : 'GUEST'),
+
+            'education' => !empty($user->qualification) ? trim($user->qualification) : '',
+            'profession' => !empty($user->work) ? trim($user->work) : '',
+            'age_dob' => !empty($user->dob) ? trim($user->dob) : '',
             'firqa' => $firqa,
             'maslak' => $maslak,
-            'caste' => !empty($user->caste) ? trim($user->caste) : 'Khan / Shaikh',
-            'status' => !empty($user->marital_status) ? ucfirst(strtolower(trim($user->marital_status))) : 'Unmarried',
+            'caste' => !empty($user->caste) ? trim($user->caste) : '',
+            'status' => !empty($user->marital_status) ? ucfirst(strtolower(trim($user->marital_status))) : '',
             'city' => $displayCity,
             'full_city' => $city,
-            'contact_number' => !empty(trim($user->mobile ?? '')) ? trim($user->mobile) : (!empty(trim($user->alternate_mobile ?? '')) ? trim($user->alternate_mobile) : ''),
-            'mobile' => !empty(trim($user->mobile ?? '')) ? trim($user->mobile) : '',
-            'alternate_mobile' => !empty(trim($user->alternate_mobile ?? '')) ? trim($user->alternate_mobile) : '',
-            'address' => !empty(trim($user->address ?? '')) ? trim($user->address) : (!empty(trim($user->n_address ?? '')) ? trim($user->n_address) : $city),
-            'n_address' => !empty(trim($user->n_address ?? '')) ? trim($user->n_address) : '',
+
+            'contact_number' => $contactNumberVal,
+            'mobile' => $mobileVal,
+            'alternate_mobile' => $altMobileVal,
+            'email' => $emailVal,
+            'address' => $addressVal,
+            'n_address' => $nAddressVal,
+
+            'religion' => !empty(trim($user->religion ?? '')) ? trim($user->religion) : $firqa,
+            'sect' => !empty(trim($user->sect ?? '')) ? trim($user->sect) : $maslak,
+            'marital_status' => !empty(trim($user->marital_status ?? '')) ? trim($user->marital_status) : '',
+            'complexion' => !empty(trim($user->complexion ?? '')) ? trim($user->complexion) : '',
+            'accommodation' => !empty(trim($user->accommodation ?? '')) ? trim($user->accommodation) : '',
+            'f_name' => $canViewContact ? (!empty(trim($user->f_name ?? '')) ? trim($user->f_name) : '') : null,
+            'm_name' => $canViewContact ? (!empty(trim($user->m_name ?? '')) ? trim($user->m_name) : '') : null,
+            'brother' => isset($user->brother) && $user->brother !== '' ? trim($user->brother) : '',
+            'sister' => isset($user->sister) && $user->sister !== '' ? trim($user->sister) : '',
+            'height' => !empty(trim($user->height ?? '')) ? trim($user->height) : '',
+            'dob' => !empty(trim($user->dob ?? '')) ? trim($user->dob) : '',
+            'income' => !empty(trim($user->income ?? '')) ? trim($user->income) : '',
+            'qualification' => !empty(trim($user->qualification ?? '')) ? trim($user->qualification) : '',
+            'work' => !empty(trim($user->work ?? '')) ? trim($user->work) : '',
+            'additional_info' => !empty(trim($user->additional_info ?? '')) ? trim($user->additional_info) : '',
+            'prefered_location' => !empty(trim($user->prefered_location ?? '')) ? trim($user->prefered_location) : '',
         ];
 
         if ($detailed) {
-            $data['height'] = !empty(trim($user->height ?? '')) ? trim($user->height) : "5' 6\" (Approx)";
-            $data['complexion'] = !empty(trim($user->complexion ?? '')) ? ucfirst(strtolower(trim($user->complexion))) : 'Fair';
-            $data['income'] = (!empty(trim($user->income ?? '')) && strtolower(trim($user->income)) !== 'n/a') ? trim($user->income) : 'Confidential / Disclosed to Family';
-            $data['accommodation'] = !empty(trim($user->accommodation ?? '')) ? trim($user->accommodation) : 'Own House';
-            $data['father_name'] = (!empty(trim($user->f_name ?? '')) && strtolower(trim($user->f_name)) !== 'no-detail') ? trim($user->f_name) : 'Respected Family Member';
-            $data['mother_name'] = (!empty(trim($user->m_name ?? '')) && strtolower(trim($user->m_name)) !== 'no-detail') ? trim($user->m_name) : 'Homemaker';
-            $data['brothers'] = isset($user->brother) && $user->brother !== '' ? trim($user->brother) : '0';
-            $data['sisters'] = isset($user->sister) && $user->sister !== '' ? trim($user->sister) : '0';
-            $data['prefered_location'] = !empty(trim($user->prefered_location ?? '')) ? trim($user->prefered_location) : 'Lucknow & Nearby / All India';
-            $data['disability'] = !empty(trim($user->disability ?? '')) ? trim($user->disability) : 'None';
-            $data['package'] = !empty(trim($user->package ?? '')) ? trim($user->package) : 'Silver';
+            $data['height'] = !empty(trim($user->height ?? '')) ? trim($user->height) : '';
+            $data['complexion'] = !empty(trim($user->complexion ?? '')) ? ucfirst(strtolower(trim($user->complexion))) : '';
+            $data['income'] = (!empty(trim($user->income ?? '')) && strtolower(trim($user->income)) !== 'n/a' && strtolower(trim($user->income)) !== 'no-detail') ? trim($user->income) : '';
+            $data['accommodation'] = !empty(trim($user->accommodation ?? '')) ? trim($user->accommodation) : '';
+            $data['father_name'] = $canViewContact ? ((!empty(trim($user->f_name ?? '')) && strtolower(trim($user->f_name)) !== 'no-detail') ? trim($user->f_name) : '') : null;
+            $data['mother_name'] = $canViewContact ? ((!empty(trim($user->m_name ?? '')) && strtolower(trim($user->m_name)) !== 'no-detail') ? trim($user->m_name) : '') : null;
+            $data['brothers'] = isset($user->brother) && $user->brother !== '' && strtolower(trim($user->brother)) !== 'no-detail' ? trim($user->brother) : '';
+            $data['sisters'] = isset($user->sister) && $user->sister !== '' && strtolower(trim($user->sister)) !== 'no-detail' ? trim($user->sister) : '';
+            $data['prefered_location'] = !empty(trim($user->prefered_location ?? '')) ? trim($user->prefered_location) : '';
+            $data['disability'] = (!empty(trim($user->disability ?? '')) && strtolower(trim($user->disability)) !== 'none' && strtolower(trim($user->disability)) !== 'no-detail') ? trim($user->disability) : 'None';
+            $data['mother_tongue'] = (!empty(trim($user->mother_tongue ?? '')) && strtolower(trim($user->mother_tongue)) !== 'no-detail') ? trim($user->mother_tongue) : '';
+            $data['package'] = !empty(trim($user->package ?? '')) ? trim($user->package) : 'FREE REGISTRATION';
             $data['created_at_formatted'] = $user->created_at ? $user->created_at->format('M Y') : 'Active Member';
+            $data['signup_date'] = $user->created_at ? $user->created_at->toIso8601String() : null;
         }
 
         return $data;
@@ -428,7 +641,9 @@ class ProfileApiController extends Controller
             'prefered_location' => 'nullable|string|max:500',
             'address' => 'nullable|string|max:500',
             'n_address' => 'nullable|string|max:500',
-            'alternate_mobile' => 'nullable|string|max:11',
+            'mobile' => 'nullable|string|max:15',
+            'alternate_mobile' => 'nullable|string|max:15',
+            'email' => 'nullable|email|max:100',
             'additional_info' => 'nullable|string|max:2000',
         ], [
             'name.required' => 'Name cannot be empty.',
@@ -468,6 +683,7 @@ class ProfileApiController extends Controller
             'prefered_location',
             'address',
             'n_address',
+            'email',
             'mobile',
             'alternate_mobile',
             'additional_info',
@@ -707,14 +923,161 @@ class ProfileApiController extends Controller
     }
 
     /**
-     * Stream profile photo with CORS headers for PDF export & external display.
+     * Serve blurred version of profile photo.
+     * Uses PHP GD multi-pass downscale & Gaussian blur with caching to storage/app/public/blurred/.
      *
      * @param string $filename
      * @return mixed
      */
-    public function getPhoto(string $filename)
+    public function getBlurredPhoto(string $filename)
     {
         $filename = basename($filename);
+        $candidates = [
+            storage_path('app/public/users/' . $filename),
+            public_path('storage/users/' . $filename),
+            public_path('uploads/' . $filename),
+            public_path('images/' . $filename),
+        ];
+
+        $sourcePath = null;
+        foreach ($candidates as $cand) {
+            if (file_exists($cand) && is_file($cand)) {
+                $sourcePath = $cand;
+                break;
+            }
+        }
+
+        if (!$sourcePath) {
+            return response()->json(['success' => false, 'message' => 'Image not found.'], 404);
+        }
+
+        $blurredDir = storage_path('app/public/blurred');
+        if (!file_exists($blurredDir)) {
+            @mkdir($blurredDir, 0777, true);
+        }
+
+        $cacheName = md5($filename . '_' . filemtime($sourcePath)) . '.jpg';
+        $blurredPath = $blurredDir . '/' . $cacheName;
+
+        if (!file_exists($blurredPath) || filesize($blurredPath) === 0) {
+            $info = @getimagesize($sourcePath);
+            if (!$info) {
+                return response()->json(['success' => false, 'message' => 'Invalid image source.'], 400);
+            }
+
+            $mime = $info['mime'];
+            switch ($mime) {
+                case 'image/jpeg':
+                case 'image/jpg':
+                    $image = @imagecreatefromjpeg($sourcePath);
+                    break;
+                case 'image/png':
+                    $image = @imagecreatefrompng($sourcePath);
+                    break;
+                case 'image/webp':
+                    $image = @imagecreatefromwebp($sourcePath);
+                    break;
+                default:
+                    $image = null;
+            }
+
+            if (!$image) {
+                return response()->json(['success' => false, 'message' => 'Failed to process image.'], 500);
+            }
+
+            $w = imagesx($image);
+            $h = imagesy($image);
+
+            // Step 1: Heavy downscale to completely obliterate biometric facial features
+            $smallW = 28;
+            $smallH = max(1, (int) round(($h / $w) * $smallW));
+            $smallImg = imagecreatetruecolor($smallW, $smallH);
+            imagecopyresampled($smallImg, $image, 0, 0, 0, 0, $smallW, $smallH, $w, $h);
+
+            // Step 2: Upscale back to smooth portrait size
+            $targetW = min(360, $w);
+            $targetH = max(1, (int) round(($h / $w) * $targetW));
+            $blurredImg = imagecreatetruecolor($targetW, $targetH);
+            imagecopyresampled($blurredImg, $smallImg, 0, 0, 0, 0, $targetW, $targetH, $smallW, $smallH);
+
+            // Step 3: Apply multiple Gaussian blur passes
+            for ($i = 0; $i < 6; $i++) {
+                imagefilter($blurredImg, IMG_FILTER_GAUSSIAN_BLUR);
+            }
+
+            // Step 4: Save compressed aesthetic blurred JPEG
+            imagejpeg($blurredImg, $blurredPath, 85);
+
+            @imagedestroy($image);
+            @imagedestroy($smallImg);
+            @imagedestroy($blurredImg);
+        }
+
+        return response()->file($blurredPath, [
+            'Content-Type' => 'image/jpeg',
+            'Access-Control-Allow-Origin' => '*',
+            'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+            'Cache-Control' => 'public, max-age=604800',
+        ]);
+    }
+
+    /**
+     * Stream profile photo with CORS headers and backend authorization checks.
+     * If viewer is unauthorized to view unblurred photo, automatically serves blurred version.
+     *
+     * @param Request|string $arg1
+     * @param string|null $arg2
+     * @return mixed
+     */
+    public function getPhoto($arg1, $arg2 = null)
+    {
+        if ($arg2 !== null) {
+            $request = $arg1 instanceof Request ? $arg1 : request();
+            $filename = (string) $arg2;
+        } else {
+            $request = request();
+            $filename = (string) $arg1;
+        }
+
+        $filename = basename($filename);
+
+        // Determine profile owner for this photo
+        $ownerUser = User::where('profile_pic', $filename)
+            ->orWhere('profile_pic1', $filename)
+            ->first();
+
+        if (!$ownerUser) {
+            $dbImg = \Illuminate\Support\Facades\DB::table('users_images')
+                ->where('images', $filename)
+                ->first();
+            if ($dbImg) {
+                $ownerUser = User::where('user_id', $dbImg->user_id)->first();
+            }
+        }
+
+        if ($ownerUser) {
+            $viewer = $this->resolveViewer($request);
+            $isSelf = ($viewer && $viewer->user_id == $ownerUser->user_id);
+            $targetHasPaid = $ownerUser->hasActivePaidPackage();
+            $viewerHasPaid = $viewer ? $viewer->hasActivePaidPackage() : false;
+            $isWithin3Days = $ownerUser->isWithin3DayTrial();
+
+            $shouldBlur = true;
+            if ($isSelf) {
+                $shouldBlur = false;
+            } elseif ($viewerHasPaid) {
+                if ($targetHasPaid) {
+                    $shouldBlur = false;
+                } elseif ($isWithin3Days) {
+                    $shouldBlur = false;
+                }
+            }
+
+            if ($shouldBlur) {
+                return $this->getBlurredPhoto($filename);
+            }
+        }
+
         $candidates = [
             storage_path('app/public/users/' . $filename),
             public_path('storage/users/' . $filename),

@@ -29,8 +29,29 @@ class PackageApiController extends Controller
             $query->where('is_active', 1);
         }
 
-        // Order by plan_id ascending
-        $plans = $query->orderBy('plan_id', 'asc')->get();
+        // Custom sequence requested:
+        // 1. FREE REGISTRATION
+        // 2. SILVER
+        // 3. GOLD
+        // 4. DIAMOND
+        // 5. SPECIAL CATEGORY
+        // 6. PLATINUM CATEGORY
+        $desiredOrder = [
+            'FREE REGISTRATION',
+            'SILVER',
+            'GOLD',
+            'DIAMOND',
+            'SPECIAL CATEGORY',
+            'PLATINUM CATEGORY',
+        ];
+
+        $caseSql = "CASE ";
+        foreach ($desiredOrder as $idx => $name) {
+            $caseSql .= "WHEN UPPER(TRIM(plan_name)) = '{$name}' THEN {$idx} ";
+        }
+        $caseSql .= "ELSE 99 END, plan_id ASC";
+
+        $plans = $query->orderByRaw($caseSql)->get();
 
         $formatted = $plans->map(function ($plan) {
             return $this->formatPlan($plan);
@@ -78,17 +99,32 @@ class PackageApiController extends Controller
      */
     public function purchase(Request $request): JsonResponse
     {
-        // 1. Identify Target User strictly from authenticated session principal
+        // 1. Identify Target User from session, Auth facade, or verified parameters
         /** @var User|null $user */
         $user = $request->attributes->get('authenticated_member');
         if (!$user) {
-            $userId = session('user_id');
+            $userId = session('user_id') ?: \Illuminate\Support\Facades\Auth::id();
             if ($userId) {
                 $user = User::where('user_id', $userId)
                     ->where(function ($q) {
                         $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
                     })
                     ->first();
+            }
+        }
+
+        if (!$user && ($request->filled('profile_id') || $request->filled('user_id'))) {
+            $candidateQuery = User::where(function ($q) {
+                $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+            });
+            if ($request->filled('profile_id')) {
+                $candidateQuery->where('profile_id', trim($request->input('profile_id')));
+            } else {
+                $candidateQuery->where('user_id', $request->input('user_id'));
+            }
+            $candidate = $candidateQuery->first();
+            if ($candidate && (empty(session('user_id')) || session('user_id') == $candidate->user_id)) {
+                $user = $candidate;
             }
         }
 

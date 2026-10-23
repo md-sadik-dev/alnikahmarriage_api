@@ -48,6 +48,9 @@ class Banner extends Model
      */
     protected $fillable = [
         'title',
+        'eyebrow',
+        'description',
+        'btn_text',
         'image',
         'image_alt',
         'image_title',

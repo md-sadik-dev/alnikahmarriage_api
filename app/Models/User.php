@@ -118,4 +118,55 @@ class User extends Authenticatable
         'created_at' => 'datetime',
         'modified_at' => 'datetime',
     ];
+
+    /**
+     * Check if user has an active, paid membership package.
+     *
+     * @return bool
+     */
+    public function hasActivePaidPackage(): bool
+    {
+        $pkg = strtoupper(trim($this->package ?? ''));
+        if (empty($pkg) || in_array($pkg, ['NONE', 'FREE REGISTRATION', 'FREE', 'NO-DETAIL', 'UNPAID', 'EXPIRED'])) {
+            return false;
+        }
+
+        // Verify end_date if set
+        if (!empty($this->end_date)) {
+            $endStr = strtoupper(trim($this->end_date));
+            if (!str_contains($endStr, 'UNLIMITED') && !str_contains($endStr, 'NIKAH')) {
+                try {
+                    $endDate = \Carbon\Carbon::parse($this->end_date)->endOfDay();
+                    if ($endDate->isPast()) {
+                        return false; // Package validity expired
+                    }
+                } catch (\Throwable $e) {}
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Calculate days since registration based on created_at timestamp.
+     *
+     * @return int
+     */
+    public function daysSinceRegistration(): int
+    {
+        if (!$this->created_at) {
+            return 999;
+        }
+        return (int) \Carbon\Carbon::parse($this->created_at)->diffInDays(\Carbon\Carbon::now());
+    }
+
+    /**
+     * Check if user is within the initial 3-day signup trial window.
+     *
+     * @return bool
+     */
+    public function isWithin3DayTrial(): bool
+    {
+        return $this->daysSinceRegistration() <= 3;
+    }
 }

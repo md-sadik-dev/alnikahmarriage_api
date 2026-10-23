@@ -15,44 +15,10 @@ use App\Http\Controllers\PageController;
 | The frontend has been fully migrated to pure HTML/CSS/JS.
 | This backend provides headless RESTful APIs for Web and Mobile Apps.
 */
-
 Route::get('/', function () {
     return response()->json([
         'status' => 'success',
-        'message' => 'Al-Nikah Matrimonial Headless API Backend is running.',
-        'version' => '1.0.0',
-        'documentation' => url('/AlNikah_Auth_APIs.postman_collection.json'),
-        'api_base' => url('/api'),
-        'endpoints' => [
-            'auth' => [
-                'POST /api/login',
-                'POST /api/signup',
-                'GET /api/me',
-                'POST /api/logout',
-            ],
-            'profiles' => [
-                'GET /api/profiles',
-                'GET /api/profiles/featured',
-                'GET /api/profiles/{id}',
-            ],
-            'packages' => [
-                'GET /api/packages',
-                'GET /api/packages/current',
-                'POST /api/packages/purchase',
-                'POST /api/packages/upgrade',
-            ],
-            'banners' => [
-                'GET /api/banners',
-            ],
-            'gallery' => [
-                'GET /api/gallery',
-                'GET /api/success-stories',
-            ],
-            'inquiries' => [
-                'POST /api/feedback',
-                'POST /api/contact-us',
-            ],
-        ],
+        'message' => 'API is running',
     ]);
 });
 
@@ -64,6 +30,9 @@ Route::get('/logout', [AuthApiController::class, 'logout'])->name('logout.get');
 Route::post('/logout', [AuthApiController::class, 'logout'])->name('logout.post');
 Route::post('/contact-us', [PageController::class, 'submitFeedback'])->name('contact.post');
 Route::post('/feedback', [PageController::class, 'submitFeedback'])->name('feedback.post');
+
+Route::get('api/photo/blurred/{filename}', [ProfileApiController::class, 'getBlurredPhoto']);
+Route::get('api/photo/{filename}', [ProfileApiController::class, 'getPhoto']);
 
 // Web prefix API fallbacks for backwards compatibility
 Route::prefix('api/profiles')->group(function () {
