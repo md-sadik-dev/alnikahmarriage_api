@@ -34,6 +34,8 @@ class MetaApiController extends Controller
             'message' => 'Metadata options retrieved successfully.',
             'data' => [
                 'religions' => $religions,
+                'maslaqs' => $religions,
+                'sects' => $religions,
                 'castes' => $castes,
             ],
         ], 200);

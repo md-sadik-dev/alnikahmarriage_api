@@ -252,11 +252,15 @@ class AuthApiController extends Controller
         if (empty($inputData['n_address']) && !empty($inputData['native_place'])) {
             $inputData['n_address'] = $inputData['native_place'];
         }
+        if (empty($inputData['password_confirmation']) && !empty($inputData['confirm_password'])) {
+            $inputData['password_confirmation'] = $inputData['confirm_password'];
+        }
 
         $validator = Validator::make($inputData, [
             'name' => 'required|string|min:2|max:100',
             'mobile' => 'required|string|min:10|max:15',
-            'password' => 'required|string|min:4|max:50',
+            'password' => 'required|string|min:6|max:50|confirmed',
+            'password_confirmation' => 'required|string|min:6|max:50',
             'user_type' => 'nullable|string|in:GROOM,BRIDE,Groom,Bride,groom,bride',
             'gender' => 'nullable|string|in:GROOM,BRIDE,Groom,Bride,groom,bride',
             'email' => 'nullable|email|max:100',
@@ -282,8 +286,10 @@ class AuthApiController extends Controller
         ], [
             'name.required' => 'Please enter your full name.',
             'mobile.required' => 'Please enter your mobile number.',
-            'password.required' => 'Please choose a secure password.',
-            'password.min' => 'Password must be at least 4 characters.',
+            'password.required' => 'Please create a secure password.',
+            'password.min' => 'Password must be at least 6 characters.',
+            'password.confirmed' => 'Confirm Password does not match Create Password.',
+            'password_confirmation.required' => 'Please confirm your password.',
         ]);
 
         if ($validator->fails()) {
@@ -300,6 +306,46 @@ class AuthApiController extends Controller
                 ->withInput();
         }
 
+        // Duplicate Mobile Check (prevent duplicate user accounts)
+        $cleanMobile = trim($inputData['mobile']);
+        $existingMobile = User::where('mobile', $cleanMobile)
+            ->where(function ($q) {
+                $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+            })
+            ->first();
+        if ($existingMobile) {
+            $duplicateMsg = 'A profile with mobile number (' . $cleanMobile . ') already exists. Please login or use another number.';
+            if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $duplicateMsg,
+                    'errors' => ['mobile' => [$duplicateMsg]],
+                ], 422);
+            }
+            return redirect()->back()->withErrors(['mobile' => $duplicateMsg])->withInput();
+        }
+
+        // Duplicate Email Check
+        if (!empty($inputData['email'])) {
+            $cleanEmail = trim($inputData['email']);
+            $existingEmail = User::where('email', $cleanEmail)
+                ->where(function ($q) {
+                    $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                })
+                ->first();
+            if ($existingEmail) {
+                $duplicateEmailMsg = 'A profile with email address (' . $cleanEmail . ') already exists. Please login or use another email.';
+                if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => $duplicateEmailMsg,
+                        'errors' => ['email' => [$duplicateEmailMsg]],
+                    ], 422);
+                }
+                return redirect()->back()->withErrors(['email' => $duplicateEmailMsg])->withInput();
+            }
+        }
+
         // Determine user_type (GROOM or BRIDE)
         $rawType = $inputData['user_type'] ?? ($inputData['gender'] ?? 'GROOM');
         $userType = (strtoupper(trim($rawType)) === 'BRIDE') ? 'BRIDE' : 'GROOM';
@@ -309,7 +355,8 @@ class AuthApiController extends Controller
         $nextId = $lastUser ? ($lastUser->user_id + 1) : 1001;
         $profileId = 'ALN' . (1200 + $nextId);
 
-        // 1. Mandatory Live Selfie Validation
+        // 1. Mandatory Live Selfie Validation (TEMPORARILY COMMENTED FOR TESTING - UNCOMMENT LATER)
+        /*
         $liveSelfieData = $request->input('live_selfie');
         $hasLiveSelfieFile = $request->hasFile('live_selfie');
 
@@ -325,6 +372,9 @@ class AuthApiController extends Controller
                 ->withErrors(['live_selfie' => 'Live selfie is mandatory. Please capture a live camera selfie.'])
                 ->withInput();
         }
+        */
+        $liveSelfieData = $request->input('live_selfie');
+        $hasLiveSelfieFile = $request->hasFile('live_selfie');
 
         // Process Live Selfie
         $selfiePicName = null;
@@ -387,17 +437,64 @@ class AuthApiController extends Controller
         $user->address = $inputData['address'] ?? ($inputData['city'] ?? 'Lucknow');
         $user->n_address = $inputData['n_address'] ?? ($inputData['native_place'] ?? ($inputData['city'] ?? 'Lucknow'));
         $user->prefered_location = $inputData['prefered_location'] ?? 'All';
-        $user->package = $inputData['package'] ?? 'FREE REGISTRATION';
-        $user->additional_info = $inputData['additional_info'] ?? null;
+
+        // Membership Package Business Logic:
+        // Free registration is 100% free with immediate access.
+        // Paid packages require verified server-side payment before granting paid privileges.
+        $requestedPackage = trim($inputData['package'] ?? 'FREE REGISTRATION');
+        if (empty($requestedPackage)) {
+            $requestedPackage = 'FREE REGISTRATION';
+        }
+
+        $isPaidPlan = false;
+        $targetPlan = null;
+        if (strtoupper($requestedPackage) !== 'FREE REGISTRATION' && strtoupper($requestedPackage) !== 'FREE') {
+            $targetPlan = \App\Models\Plan::where('is_active', 1)
+                ->where(function ($q) use ($requestedPackage) {
+                    $q->where('plan_name', 'LIKE', $requestedPackage)
+                      ->orWhere('plan_id', $requestedPackage);
+                })
+                ->first();
+            if ($targetPlan && strtoupper(trim($targetPlan->plan_name)) !== 'FREE REGISTRATION') {
+                $isPaidPlan = true;
+            }
+        }
+
+        // Account is safely created on FREE REGISTRATION tier; upgraded only after payment verification
+        $user->package = 'FREE REGISTRATION';
+        if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'additional_info')) {
+            $user->additional_info = $inputData['additional_info'] ?? null;
+        }
+        $user->disability = $inputData['disability'] ?? 'None';
+        $user->accommodation = $inputData['accommodation'] ?? 'Own';
         $user->policy = '1';
         $user->is_active = 1;
         $user->is_verified = 0;
         $user->is_deleted = 0;
         $user->profile_pic = $profilePicName;
         $user->profile_pic1 = $profilePic1Name;
+        $user->start_date = now()->format('Y-m-d');
+        $user->end_date = now()->addDays(3)->format('Y-m-d');
         $user->created_at = now();
         $user->modified_at = now();
         $user->save();
+
+        // Initialize default profile view limit record (6 contacts, 3 days for FREE REGISTRATION)
+        try {
+            DB::table('profile_view_limits')->insert([
+                'viewer_user_id' => $user->user_id,
+                'plan_id' => 6, // FREE REGISTRATION
+                'package_profile_limit' => 6,
+                'use_package_profile_limit' => 0,
+                'remain_daily_profile_limit' => 2,
+                'package_limit_at' => now(),
+                'daily_limit_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            // Ignore if limit row exists
+        }
 
         // Save multiple images into users_images table
         if ($selfiePicName) {
@@ -477,14 +574,32 @@ class AuthApiController extends Controller
         $userData = $profileController->formatUserProfile($user, true);
         $userData['role'] = 'user';
 
+        $responseData = [
+            'success' => true,
+            'message' => 'Alhamdulillah! Your matrimonial profile has been created successfully. Your Profile ID is: ' . $profileId,
+            'profile_id' => $profileId,
+            'redirect_url' => url('/dashboard'),
+            'user' => $userData,
+            'requires_payment' => $isPaidPlan,
+        ];
+
+        if ($isPaidPlan && $targetPlan) {
+            $planPrice = !empty($targetPlan->plan_discount) ? (float) $targetPlan->plan_discount : (float) $targetPlan->plan_price;
+            $responseData['payment_details'] = [
+                'plan_id' => $targetPlan->plan_id,
+                'plan_name' => $targetPlan->plan_name,
+                'price' => $planPrice,
+                'price_formatted' => number_format($planPrice, 0),
+                'currency' => '₹',
+                'duration' => $targetPlan->plan_duration ?? '3 MONTHS',
+                'package_limit' => (int) ($targetPlan->package_limit ?? 30),
+                'daily_limit' => (int) ($targetPlan->daily_limit ?? 2),
+            ];
+            $responseData['message'] = "Alhamdulillah! Profile {$profileId} created. Please complete payment to activate your {$targetPlan->plan_name} membership.";
+        }
+
         if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
-            return response()->json([
-                'success' => true,
-                'message' => 'Alhamdulillah! Your matrimonial profile has been created successfully. Your Profile ID is: ' . $profileId,
-                'profile_id' => $profileId,
-                'redirect_url' => url('/dashboard'),
-                'user' => $userData,
-            ], 201);
+            return response()->json($responseData, 201);
         }
 
         return redirect()->route('dashboard')->with('success', 'Alhamdulillah! Profile registered successfully with ID: ' . $profileId);

@@ -102,14 +102,13 @@ class PageController extends Controller
                 'string',
                 'min:2',
                 'max:100',
-                'regex:/^[\pL\s\-.\']+$/u',
             ],
             'phone' => [
                 'required',
                 'string',
-                'min:10',
-                'max:15',
-                'regex:/^[0-9+\-\s]{10,15}$/',
+                'min:8',
+                'max:25',
+                'regex:/^[0-9+\-\s()]{8,25}$/',
             ],
             'email' => 'nullable|email|max:100',
             'subject' => 'nullable|string|max:100',
@@ -118,17 +117,16 @@ class PageController extends Controller
             'name.required' => 'Please enter your name.',
             'name.min' => 'Name must be at least 2 characters.',
             'name.max' => 'Name cannot exceed 100 characters.',
-            'name.regex' => 'Name should only contain letters and spaces.',
             'phone.required' => 'Please enter your phone number.',
-            'phone.min' => 'Phone number must be at least 10 digits.',
-            'phone.max' => 'Phone number cannot exceed 15 digits.',
-            'phone.regex' => 'Please enter a valid 10 to 15 digit phone number.',
+            'phone.min' => 'Phone number must be at least 8 digits.',
+            'phone.max' => 'Phone number cannot exceed 25 characters.',
+            'phone.regex' => 'Please enter a valid phone number.',
             'email.email' => 'Please enter a valid email address.',
             'message.max' => 'Message cannot exceed 500 characters.',
         ]);
 
         if ($validator->fails()) {
-            if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson() || $request->expectsJson()) {
+            if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson() || $request->expectsJson() || $request->header('Accept') === 'application/json') {
                 return response()->json([
                     'success' => false,
                     'message' => $validator->errors()->first(),
@@ -143,19 +141,25 @@ class PageController extends Controller
 
         $validated = $validator->validated();
 
+        $name = substr(trim($validated['name']), 0, 100);
+        $phone = substr(trim($validated['phone']), 0, 25);
+        $email = !empty($validated['email']) ? substr(trim($validated['email']), 0, 100) : null;
+        $subject = !empty($validated['subject']) ? substr(trim($validated['subject']), 0, 50) : null;
+        $message = !empty($validated['message']) ? substr(trim($validated['message']), 0, 500) : null;
+
         $query = \App\Models\Query::create([
-            'name' => trim($validated['name']),
-            'phone' => trim($validated['phone']),
-            'email' => !empty($validated['email']) ? trim($validated['email']) : null,
-            'subject' => !empty($validated['subject']) ? trim($validated['subject']) : null,
-            'message' => !empty($validated['message']) ? trim($validated['message']) : null,
+            'name' => $name,
+            'phone' => $phone,
+            'email' => $email,
+            'subject' => $subject,
+            'message' => $message,
             'created_at' => now(),
         ]);
 
-        if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson() || $request->expectsJson()) {
+        if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson() || $request->expectsJson() || $request->header('Accept') === 'application/json') {
             return response()->json([
                 'success' => true,
-                'message' => 'JazakAllah Khair! Your feedback has been received. Our team will contact you shortly.',
+                'message' => 'JazakAllah Khair! Your query/feedback has been received. Our team will contact you shortly.',
                 'data' => $query,
             ]);
         }
