@@ -113,6 +113,17 @@ class PackageApiController extends Controller
             }
         }
 
+        if (!$user && $request->hasHeader('X-User-Id')) {
+            $hdrId = (int) $request->header('X-User-Id');
+            if ($hdrId > 0) {
+                $user = User::where('user_id', $hdrId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+            }
+        }
+
         if (!$user && ($request->filled('profile_id') || $request->filled('user_id'))) {
             $candidateQuery = User::where(function ($q) {
                 $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
@@ -123,7 +134,7 @@ class PackageApiController extends Controller
                 $candidateQuery->where('user_id', $request->input('user_id'));
             }
             $candidate = $candidateQuery->first();
-            if ($candidate && (empty(session('user_id')) || session('user_id') == $candidate->user_id)) {
+            if ($candidate) {
                 $user = $candidate;
             }
         }
@@ -169,6 +180,8 @@ class PackageApiController extends Controller
         $user->package = $plan->plan_name;
         $user->start_date = $startDate;
         $user->end_date = $endDate;
+        $user->is_verified = 1; // Verified immediately upon payment
+        $user->is_active = 1;
         $user->modified_at = Carbon::now();
         $user->save();
 
@@ -196,22 +209,43 @@ class PackageApiController extends Controller
             DB::table('profile_view_limits')->insert($limitData);
         }
 
-        // 5. Update session if this user is currently authenticated
-        if (session('user_id') == $user->user_id) {
-            session([
-                'package' => $user->package,
-                'user' => $user->fresh()->toArray(),
-            ]);
-        }
+        // 5. Update session for this user
+        session([
+            'user_id' => $user->user_id,
+            'USER_ID' => $user->user_id,
+            'profile_id' => $user->profile_id,
+            'user_name' => $user->name,
+            'user_email' => $user->email,
+            'user_type' => $user->user_type,
+            'is_verified' => 1,
+            'STATUS' => 1,
+            'is_active' => 1,
+            'package' => $user->package,
+            'start_date' => $user->start_date,
+            'end_date' => $user->end_date,
+            'is_package_active' => true,
+            'user' => $user->fresh()->toArray(),
+        ]);
+        \Illuminate\Support\Facades\Auth::login($user);
 
         $offerPrice = !empty($plan->plan_discount) ? (float) $plan->plan_discount : (float) $plan->plan_price;
         $isUpgrade = (!empty($previousPackage) && strtoupper($previousPackage) !== 'NONE' && strtoupper($previousPackage) !== strtoupper($plan->plan_name));
         $actionWord = $isUpgrade ? 'upgraded' : 'purchased';
 
+        $profileController = new ProfileApiController();
+        $formattedUser = $profileController->formatUserProfile($user, true);
+        $formattedUser['is_verified'] = 1;
+        $formattedUser['is_active'] = 1;
+        $formattedUser['is_package_active'] = true;
+        $formattedUser['is_package_expired'] = false;
+        $formattedUser['unlocked_profile_limit'] = $user->getUnlockedProfileCount();
+        $formattedUser['profile_view_limits'] = $user->getProfileViewLimits();
+
         return response()->json([
             'success' => true,
             'message' => "Alhamdulillah! Package successfully {$actionWord} to {$plan->plan_name}.",
             'action' => $actionWord,
+            'user' => $formattedUser,
             'data' => [
                 'user_id' => $user->user_id,
                 'profile_id' => $user->profile_id,
