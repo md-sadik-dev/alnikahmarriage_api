@@ -6,17 +6,25 @@ use App\Http\Controllers\Controller;
 use App\Models\Gallery;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Cache;
 
 class GalleryApiController extends Controller
 {
     /**
      * Display a listing of gallery/success story images from database.
+     * Caches responses for high performance.
      *
      * @param Request $request
      * @return JsonResponse
      */
     public function index(Request $request): JsonResponse
     {
+        $cacheKey = 'gallery_' . md5($request->fullUrl());
+
+        if ($request->has('refresh') || $request->has('bust')) {
+            Cache::forget($cacheKey);
+        }
+
         $query = Gallery::where(function ($q) {
             $q->whereNull('status')->orWhere('status', 1);
         });
@@ -47,17 +55,20 @@ class GalleryApiController extends Controller
             ]);
         }
 
-        $galleries = $query->get()->map(function ($item, $index) {
-            return $this->formatGalleryItem($item, $index);
-        })->filter()->values();
+        $galleries = Cache::remember($cacheKey, 300, function () use ($query) {
+            return $query->get()->map(function ($item, $index) {
+                return $this->formatGalleryItem($item, $index);
+            })->filter()->values();
+        });
 
         return response()->json([
             'success' => true,
-            'count' => $galleries->count(),
+            'count' => is_countable($galleries) ? count($galleries) : $galleries->count(),
             'message' => 'Gallery photos and success stories retrieved successfully.',
             'data' => $galleries,
         ]);
     }
+
 
     /**
      * Display the specified gallery item.
@@ -103,21 +114,11 @@ class GalleryApiController extends Controller
         $imageName = $item->image;
         $imageUrl = '';
 
-        if (!empty($imageName)) {
-            // Check public/uploads/gallery/
-            if (file_exists(public_path('uploads/gallery/' . $imageName))) {
-                $imageUrl = url('uploads/gallery/' . rawurlencode($imageName));
-            } elseif (file_exists(base_path('../uploads/gallery/' . $imageName))) {
-                // Auto-sync from root uploads/gallery if present
-                $pubGalleryDir = public_path('uploads/gallery');
-                if (!file_exists($pubGalleryDir)) {
-                    @mkdir($pubGalleryDir, 0777, true);
-                }
-                @copy(base_path('../uploads/gallery/' . $imageName), $pubGalleryDir . '/' . $imageName);
-                if (file_exists($pubGalleryDir . '/' . $imageName)) {
-                    $imageUrl = url('uploads/gallery/' . rawurlencode($imageName));
-                }
-            }
+        if (!empty($imageName) && file_exists(storage_path('app/public/gallery/' . $imageName))) {
+            $isArtisan = (request()->getPort() == 8000);
+            $imageUrl = $isArtisan
+                ? asset('storage/gallery/' . rawurlencode($imageName))
+                : url('alnikahmarriage_api/storage/app/public/gallery/' . rawurlencode($imageName));
         }
 
         // Agar gallery image nahi hoga toh kuch show nahi karna hai

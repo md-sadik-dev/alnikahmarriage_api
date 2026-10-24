@@ -6,17 +6,29 @@ use App\Http\Controllers\Controller;
 use App\Models\Banner;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Cache;
 
 class BannerApiController extends Controller
 {
     /**
+     * Cache key for active homepage banners.
+     */
+    const CACHE_KEY = 'active_homepage_banners';
+
+    /**
      * Display a listing of homepage banners/hero slides from database.
+     * Caches active banners for high performance.
      *
      * @param Request $request
      * @return JsonResponse
      */
     public function index(Request $request): JsonResponse
     {
+        // Allow forced refresh via ?refresh=1
+        if ($request->has('refresh') || $request->has('bust')) {
+            Cache::forget(self::CACHE_KEY);
+        }
+
         $query = Banner::query();
 
         // If status filter is not explicitly "all", return active only
@@ -24,22 +36,36 @@ class BannerApiController extends Controller
             $query->where(function ($q) {
                 $q->whereNull('status')->orWhere('status', 1);
             });
+
+            $formatted = Cache::remember(self::CACHE_KEY, 300, function () use ($query) {
+                $dbBanners = $query->orderBy('id', 'asc')->get();
+                return $dbBanners->map(function ($banner, $index) {
+                    return $this->formatBannerItem($banner, $index);
+                })->filter()->values();
+            });
+        } else {
+            $dbBanners = $query->orderBy('id', 'asc')->get();
+            $formatted = $dbBanners->map(function ($banner, $index) {
+                return $this->formatBannerItem($banner, $index);
+            })->filter()->values();
         }
-
-        $dbBanners = $query->orderBy('id', 'asc')->get();
-
-        // Format banners and exclude any record where image does not exist on disk
-        $formatted = $dbBanners->map(function ($banner, $index) {
-            return $this->formatBannerItem($banner, $index);
-        })->filter()->values();
 
         return response()->json([
             'success' => true,
-            'count' => $formatted->count(),
+            'count' => is_countable($formatted) ? count($formatted) : $formatted->count(),
             'message' => 'Homepage banners retrieved successfully from database.',
             'data' => $formatted,
         ]);
     }
+
+    /**
+     * Clear cached banner data.
+     */
+    public static function clearCache(): void
+    {
+        Cache::forget(self::CACHE_KEY);
+    }
+
 
     /**
      * Display the specified banner by ID.
@@ -86,8 +112,11 @@ class BannerApiController extends Controller
         $imageUrl = '';
         $mobileImageUrl = '';
 
-        if (!empty($imageName) && file_exists(public_path('uploads/banner/' . $imageName))) {
-            $imageUrl = url('uploads/banner/' . rawurlencode($imageName));
+        if (!empty($imageName) && file_exists(storage_path('app/public/banner/' . $imageName))) {
+            $isArtisan = (request()->getPort() == 8000);
+            $imageUrl = $isArtisan
+                ? asset('storage/banner/' . rawurlencode($imageName))
+                : url('alnikahmarriage_api/storage/app/public/banner/' . rawurlencode($imageName));
             $mobileImageUrl = $imageUrl;
         }
 

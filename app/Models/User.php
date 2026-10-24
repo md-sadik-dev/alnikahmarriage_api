@@ -155,7 +155,7 @@ class User extends Authenticatable
     public function isPackageExpired(): bool
     {
         if (empty($this->end_date)) {
-            return true;
+            return false;
         }
         $endStr = strtoupper(trim($this->end_date));
         if (str_contains($endStr, 'UNLIMITED') || str_contains($endStr, 'NIKAH')) {

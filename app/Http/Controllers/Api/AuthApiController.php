@@ -394,11 +394,16 @@ class AuthApiController extends Controller
         $hasLiveSelfieFile = $request->hasFile('live_selfie');
 
         // Process Live Selfie
+        $userStorageDir = storage_path('app/public/users');
+        if (!file_exists($userStorageDir)) {
+            @mkdir($userStorageDir, 0777, true);
+        }
+
         $selfiePicName = null;
         if ($hasLiveSelfieFile) {
             $file = $request->file('live_selfie');
             $selfiePicName = 'selfie_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('uploads'), $selfiePicName);
+            $file->move($userStorageDir, $selfiePicName);
         } elseif (!empty($liveSelfieData)) {
             if (preg_match('/^data:image\/(\w+);base64,/', $liveSelfieData, $type)) {
                 $base64Data = substr($liveSelfieData, strpos($liveSelfieData, ',') + 1);
@@ -409,7 +414,7 @@ class AuthApiController extends Controller
                 $decoded = base64_decode($base64Data);
                 if ($decoded !== false) {
                     $selfiePicName = 'selfie_' . time() . '_' . uniqid() . '.' . $ext;
-                    file_put_contents(public_path('uploads/' . $selfiePicName), $decoded);
+                    file_put_contents($userStorageDir . '/' . $selfiePicName, $decoded);
                 }
             }
         }
@@ -419,14 +424,14 @@ class AuthApiController extends Controller
         if ($request->hasFile('profile_pic')) {
             $file = $request->file('profile_pic');
             $profilePicName = time() . '-' . preg_replace('/[^A-Za-z0-9]/', '', $inputData['name'] ?? 'profile') . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('uploads'), $profilePicName);
+            $file->move($userStorageDir, $profilePicName);
         }
 
         $profilePic1Name = null;
         if ($request->hasFile('profile_pic1')) {
             $file1 = $request->file('profile_pic1');
             $profilePic1Name = time() . '-2-' . preg_replace('/[^A-Za-z0-9]/', '', $inputData['name'] ?? 'profile') . '.' . $file1->getClientOriginalExtension();
-            $file1->move(public_path('uploads'), $profilePic1Name);
+            $file1->move($userStorageDir, $profilePic1Name);
         }
 
         // Insert new user into database
@@ -648,6 +653,11 @@ class AuthApiController extends Controller
                 $profileController = new ProfileApiController();
                 $formattedUser = $profileController->formatUserProfile($user, true);
                 $formattedUser['role'] = 'user';
+                $formattedUser['is_verified'] = (int) $user->is_verified;
+                $formattedUser['unlocked_profile_limit'] = $user->getUnlockedProfileCount();
+                $formattedUser['is_package_active'] = !$user->isPackageExpired();
+                $formattedUser['is_package_expired'] = $user->isPackageExpired();
+                $formattedUser['profile_view_limits'] = $user->getProfileViewLimits();
 
                 return response()->json([
                     'success' => true,

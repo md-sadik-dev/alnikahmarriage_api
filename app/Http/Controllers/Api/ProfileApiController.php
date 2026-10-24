@@ -404,6 +404,19 @@ class ProfileApiController extends Controller
 
         $viewer = $this->resolveViewer($request);
 
+        // Security / Authorization Check: expired subscriber attempting to open profile
+        if ($viewer && $viewer->user_id != $user->user_id) {
+            if ($viewer->isPackageExpired()) {
+                return response()->json([
+                    'success' => false,
+                    'view_status' => 'package_expired',
+                    'message' => 'Your package has expired. Please renew your package.',
+                    'is_package_expired' => true,
+                    'data' => $this->formatUserProfile($user, false, $viewer, $request),
+                ], 403);
+            }
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Profile details retrieved successfully.',
@@ -669,21 +682,29 @@ class ProfileApiController extends Controller
             $usedLimit = $limits ? (int) $limits->use_package_profile_limit : 0;
             $remainingLimit = max(0, $pkgLimit - $usedLimit);
 
-            if ($hasViewed) {
-                // Already viewed & recorded in profile_views table: unblurred & full contacts permanently unlocked
+            $isPackageExpired = $viewer->isPackageExpired();
+            $isViewerVerified = ((int) ($viewer->is_verified ?? 0) === 1);
+
+            if ($isViewerVerified) {
+                // Verified member on dashboard: photos and names are unblurred!
                 $isBlurred = false;
-                $canViewContact = true;
-                $viewStatus = 'viewed';
-            } elseif ($viewer->isPackageExpired()) {
-                // Expired subscriber: candidate cards on dashboard/recommendations shown without blur (matching old core PHP), but contacts locked
-                $isBlurred = false;
-                $canViewContact = false;
-                $viewStatus = 'package_expired';
+                $canViewContact = !$isPackageExpired;
+                $viewStatus = $isPackageExpired ? 'package_expired' : ($hasViewed ? 'viewed' : 'unlocked');
+
+                if ($detailed && !$hasViewed && !$isPackageExpired) {
+                    try {
+                        \Illuminate\Support\Facades\DB::table('profile_views')->insert([
+                            'viewer_user_id' => $viewer->user_id,
+                            'profile_user_id' => $user->user_id,
+                            'viewed_at' => now(),
+                        ]);
+                    } catch (\Throwable $e) {}
+                }
             } else {
-                // Active subscriber viewing an unviewed profile: unblurred photo, but candidate phone/address locked until view quota deducted
-                $isBlurred = false;
+                // Unverified member viewing
+                $isBlurred = true;
                 $canViewContact = false;
-                $viewStatus = ($usedLimit >= $pkgLimit) ? 'limit_reached_package' : 'unlockable';
+                $viewStatus = 'login_required';
             }
         } else {
             // Guest visitor: blurred photo & locked contacts
@@ -706,40 +727,17 @@ class ProfileApiController extends Controller
         // Helper to locate physical file on server
         $resolveLocalPhoto = function ($filename) {
             if (empty($filename)) return null;
-            $candidates = [
-                storage_path('app/public/users/' . $filename),
-                public_path('storage/users/' . $filename),
-                public_path('uploads/' . $filename),
-                public_path('images/' . $filename),
-            ];
-            foreach ($candidates as $cand) {
-                if (file_exists($cand) && is_file($cand)) {
-                    return $cand;
-                }
-            }
-            return null;
+            $path = storage_path('app/public/users/' . $filename);
+            return (file_exists($path) && is_file($path)) ? $path : $this->tryFetchRemotePhoto($filename);
         };
 
         // Helper to find web path
-        $checkPhoto = function ($filename) {
+        $checkPhoto = function ($filename) use ($resolveLocalPhoto) {
             if (empty($filename)) return null;
-            if (file_exists(public_path('storage/users/' . $filename))) {
-                return asset('storage/users/' . $filename);
-            }
-            if (file_exists(storage_path('app/public/users/' . $filename))) {
-                return asset('storage/users/' . $filename);
-            }
-            if (file_exists(public_path('storage/' . $filename))) {
-                return asset('storage/' . $filename);
-            }
-            if (file_exists(public_path('uploads/' . $filename))) {
-                return asset('uploads/' . $filename);
-            }
-            if (file_exists(public_path('images/' . $filename))) {
-                return asset('images/' . $filename);
-            }
-            return null;
+            $local = $resolveLocalPhoto($filename);
+            return $local ? asset('storage/users/' . $filename) : null;
         };
+
 
         // Image URL and Stream resolution
         $base64Photo = null;
@@ -1261,23 +1259,13 @@ class ProfileApiController extends Controller
     public function getBlurredPhoto(string $filename)
     {
         $filename = basename($filename);
-        $candidates = [
-            storage_path('app/public/users/' . $filename),
-            public_path('storage/users/' . $filename),
-            public_path('uploads/' . $filename),
-            public_path('images/' . $filename),
-        ];
-
-        $sourcePath = null;
-        foreach ($candidates as $cand) {
-            if (file_exists($cand) && is_file($cand)) {
-                $sourcePath = $cand;
-                break;
-            }
+        $sourcePath = storage_path('app/public/users/' . $filename);
+        if (!file_exists($sourcePath) || !is_file($sourcePath)) {
+            $sourcePath = $this->tryFetchRemotePhoto($filename);
         }
 
         if (!$sourcePath) {
-            return response()->json(['success' => false, 'message' => 'Image not found.'], 404);
+            return $this->serveNeutralAvatar();
         }
 
         $blurredDir = storage_path('app/public/blurred');
@@ -1291,7 +1279,7 @@ class ProfileApiController extends Controller
         if (!file_exists($blurredPath) || filesize($blurredPath) === 0) {
             $info = @getimagesize($sourcePath);
             if (!$info) {
-                return response()->json(['success' => false, 'message' => 'Invalid image source.'], 400);
+                return $this->serveNeutralAvatar();
             }
 
             $mime = $info['mime'];
@@ -1311,7 +1299,7 @@ class ProfileApiController extends Controller
             }
 
             if (!$image) {
-                return response()->json(['success' => false, 'message' => 'Failed to process image.'], 500);
+                return $this->serveNeutralAvatar();
             }
 
             $w = imagesx($image);
@@ -1369,29 +1357,94 @@ class ProfileApiController extends Controller
         }
 
         $filename = basename($filename);
+        $path = storage_path('app/public/users/' . $filename);
+        if (!file_exists($path) || !is_file($path)) {
+            $path = $this->tryFetchRemotePhoto($filename);
+        }
 
-        $candidates = [
-            storage_path('app/public/users/' . $filename),
-            public_path('storage/users/' . $filename),
-            public_path('uploads/' . $filename),
-            public_path('images/' . $filename),
-            storage_path('app/public/' . $filename),
-            public_path('storage/' . $filename),
+        if ($path && file_exists($path) && is_file($path)) {
+            $mime = @mime_content_type($path) ?: 'image/jpeg';
+            return response()->file($path, [
+                'Content-Type' => $mime,
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+                'Cache-Control' => 'public, max-age=86400',
+            ]);
+        }
+
+        return $this->serveNeutralAvatar();
+    }
+
+    /**
+     * Attempt to fetch missing photo from live production server and cache locally.
+     *
+     * @param string $filename
+     * @return string|null Local path if successfully fetched, null otherwise.
+     */
+    public function tryFetchRemotePhoto(string $filename): ?string
+    {
+        $filename = basename($filename);
+        if (empty($filename)) return null;
+
+        $dest = storage_path('app/public/users/' . $filename);
+        if (file_exists($dest) && filesize($dest) > 500) {
+            return $dest;
+        }
+
+        $baseUrls = [
+            'https://alnikahmarriage.com/uploads/user-image/',
+            'https://alnikahmarriage.com/uploads/',
+            'https://alnikahmarriage.com/storage/users/',
         ];
 
-        foreach ($candidates as $path) {
-            if (file_exists($path) && is_file($path)) {
-                $mime = @mime_content_type($path) ?: 'image/jpeg';
-                return response()->file($path, [
-                    'Content-Type' => $mime,
-                    'Access-Control-Allow-Origin' => '*',
-                    'Access-Control-Allow-Methods' => 'GET, OPTIONS',
-                    'Cache-Control' => 'public, max-age=86400',
-                ]);
+        $encoded = rawurlencode($filename);
+        $ctx = stream_context_create([
+            'http' => [
+                'timeout' => 5,
+                'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                'ignore_errors' => true,
+            ],
+            'ssl' => [
+                'verify_peer' => false,
+                'verify_peer_name' => false,
+            ]
+        ]);
+
+        foreach ($baseUrls as $base) {
+            $data = @file_get_contents($base . $encoded, false, $ctx);
+            if ($data !== false && strlen($data) > 500) {
+                if (strpos($data, '<!DOCTYPE') === false && strpos($data, '<html') === false) {
+                    $dir = dirname($dest);
+                    if (!is_dir($dir)) {
+                        @mkdir($dir, 0777, true);
+                    }
+                    @file_put_contents($dest, $data);
+                    return $dest;
+                }
             }
         }
 
-        return response()->json(['success' => false, 'message' => 'Image not found.'], 404);
+        return null;
+    }
+
+    /**
+     * Return neutral SVG silhouette avatar response when an image is genuinely missing.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    protected function serveNeutralAvatar()
+    {
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">' .
+            '<circle cx="60" cy="60" r="58" fill="#faf4eb" stroke="#c5a059" stroke-width="3"/>' .
+            '<circle cx="60" cy="46" r="22" fill="#8c1d28"/>' .
+            '<path d="M26 102 C26 78, 42 68, 60 68 C78 68, 94 102 Z" fill="#8c1d28"/>' .
+            '</svg>';
+
+        return response($svg, 200, [
+            'Content-Type' => 'image/svg+xml',
+            'Access-Control-Allow-Origin' => '*',
+            'Cache-Control' => 'public, max-age=86400',
+        ]);
     }
 }
 
