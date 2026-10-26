@@ -18,7 +18,7 @@ use App\Http\Controllers\Api\VideoApiController;
 */
 
 // Authentication APIs (Login, Signup, Me, Logout)
-Route::post('/login', [AuthApiController::class, 'login'])->name('api.login');
+Route::post('/login', [AuthApiController::class, 'login'])->middleware('throttle:5,1')->name('api.login');
 Route::post('/signup', [AuthApiController::class, 'register'])->name('api.signup');
 Route::post('/register', [AuthApiController::class, 'register'])->name('api.register');
 Route::get('/me', [AuthApiController::class, 'me'])->name('api.me');
@@ -49,6 +49,10 @@ Route::middleware('auth.member')->group(function () {
     Route::get('/profile', [ProfileApiController::class, 'meProfile'])->name('api.profile.me');
     Route::match(['put', 'post'], '/profile/update', [ProfileApiController::class, 'update'])->name('api.profile.update');
     Route::post('/profile/photo', [ProfileApiController::class, 'uploadPhoto'])->name('api.profile.photo');
+    Route::post('/profile/photos/add', [ProfileApiController::class, 'addPhotos'])->name('api.profile.photos.add');
+    Route::post('/profile/photos/{id}/set-main', [ProfileApiController::class, 'setMainPhoto'])->name('api.profile.photos.set-main');
+    Route::match(['delete', 'post'], '/profile/photos/{id}/delete', [ProfileApiController::class, 'deletePhoto'])->name('api.profile.photos.delete.post');
+    Route::delete('/profile/photos/{id}', [ProfileApiController::class, 'deletePhoto'])->name('api.profile.photos.delete');
     Route::post('/profile/change-password', [ProfileApiController::class, 'changePassword'])->name('api.profile.change-password');
 
     // Inbox & Interests Endpoints
@@ -103,5 +107,3 @@ Route::get('/video-guides', [VideoApiController::class, 'index'])->name('api.vid
 
 // Contact / Feedback APIs
 Route::post('/feedback', [\App\Http\Controllers\PageController::class, 'submitFeedback'])->name('api.feedback.submit');
-Route::post('/contact-us', [\App\Http\Controllers\PageController::class, 'submitFeedback'])->name('api.contact.submit');
-Route::post('/queries', [\App\Http\Controllers\PageController::class, 'submitFeedback'])->name('api.queries.submit');

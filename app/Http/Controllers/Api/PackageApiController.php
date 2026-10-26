@@ -31,13 +31,15 @@ class PackageApiController extends Controller
 
         // Custom sequence requested:
         // 1. FREE REGISTRATION
-        // 2. SILVER
-        // 3. GOLD
-        // 4. DIAMOND
-        // 5. SPECIAL CATEGORY
-        // 6. PLATINUM CATEGORY
+        // 2. 3 DAYS FREE TRAIL
+        // 3. SILVER
+        // 4. GOLD
+        // 5. DIAMOND
+        // 6. SPECIAL CATEGORY
+        // 7. PLATINUM CATEGORY
         $desiredOrder = [
             'FREE REGISTRATION',
+            '3 DAYS FREE TRAIL',
             'SILVER',
             'GOLD',
             'DIAMOND',
@@ -73,9 +75,13 @@ class PackageApiController extends Controller
      */
     public function show($id): JsonResponse
     {
-        $plan = Plan::where('plan_id', $id)
-            ->orWhere('plan_name', 'LIKE', $id)
-            ->first();
+        $query = Plan::query();
+        if (is_numeric($id)) {
+            $query->where('plan_id', (int) $id);
+        } else {
+            $query->where('plan_name', 'LIKE', $id);
+        }
+        $plan = $query->first();
 
         if (!$plan) {
             return response()->json([
@@ -158,10 +164,12 @@ class PackageApiController extends Controller
         }
 
         $query = Plan::query();
-        if ($planId) {
-            $query->where('plan_id', $planId);
-        } else {
+        if ($planId && is_numeric($planId)) {
+            $query->where('plan_id', (int) $planId);
+        } elseif ($planName) {
             $query->where('plan_name', 'LIKE', $planName);
+        } else {
+            $query->where('plan_name', 'LIKE', $planId);
         }
         $plan = $query->first();
 
@@ -338,6 +346,10 @@ class PackageApiController extends Controller
         if (str_contains($d, 'UNLIMITED') || str_contains($d, 'UN LIMITED') || str_contains($d, 'TILL NIKAH')) {
             return Carbon::now()->addYears(5)->format('Y-m-d');
         }
+        if (preg_match('/(\d+)\s*DAY/i', $d, $m)) {
+            $days = (int) $m[1];
+            return Carbon::now()->addDays($days)->format('Y-m-d');
+        }
         if (preg_match('/(\d+)\s*MONTH/i', $d, $m)) {
             $months = (int) $m[1];
             return Carbon::now()->addMonths($months)->format('Y-m-d');
@@ -375,8 +387,10 @@ class PackageApiController extends Controller
         $isFeatured = false;
         $cardClass = 'package-card';
 
-        if (str_contains($planNameUpper, 'FREE')) {
-            $ribbon = 'Special Offer';
+        if (str_contains($planNameUpper, 'TRAIL') || (str_contains($planNameUpper, 'FREE') && str_contains($planNameUpper, '3'))) {
+            $ribbon = 'Trial Pack';
+        } elseif (str_contains($planNameUpper, 'FREE')) {
+            $ribbon = 'Basic Access';
         } elseif (str_contains($planNameUpper, 'SILVER')) {
             $ribbon = 'Silver Plan';
         } elseif (str_contains($planNameUpper, 'GOLD')) {

@@ -726,71 +726,97 @@ class ProfileApiController extends Controller
 
         // Helper to locate physical file on server
         $resolveLocalPhoto = function ($filename) {
-            if (empty($filename)) return null;
-            $path = storage_path('app/public/users/' . $filename);
-            return (file_exists($path) && is_file($path)) ? $path : $this->tryFetchRemotePhoto($filename);
+            return $this->findLocalPhotoPath($filename);
         };
 
         // Helper to find web path
         $checkPhoto = function ($filename) use ($resolveLocalPhoto) {
             if (empty($filename)) return null;
             $local = $resolveLocalPhoto($filename);
-            return $local ? asset('storage/users/' . $filename) : null;
+            return $local ? url('/api/photo/' . rawurlencode($filename)) : null;
         };
-
 
         // Image URL and Stream resolution
         $base64Photo = null;
         $imageUrl = null;
         $photoStreamUrl = null;
         $allImages = [];
+        $photosGallery = [];
 
-        if (!empty($user->profile_pic)) {
-            if ($isBlurred) {
-                // Return server-side blurred photo endpoint
-                $imageUrl = url('/api/photo/blurred/' . rawurlencode($user->profile_pic));
-                $photoStreamUrl = $imageUrl;
-                $allImages[] = $imageUrl;
-            } else {
-                // Return crisp original photo endpoint
-                $localPath = $resolveLocalPhoto($user->profile_pic);
-                if ($localPath) {
-                    $imageUrl = $checkPhoto($user->profile_pic) ?: asset('storage/users/' . $user->profile_pic);
-                    $photoStreamUrl = url('/api/photo/' . rawurlencode($user->profile_pic));
-                    $mime = @mime_content_type($localPath) ?: 'image/jpeg';
-                    $fileBytes = @file_get_contents($localPath);
-                    if ($fileBytes) {
-                        $base64Photo = 'data:' . $mime . ';base64,' . base64_encode($fileBytes);
-                    }
-                } else {
-                    $imageUrl = $checkPhoto($user->profile_pic);
-                    $photoStreamUrl = $imageUrl ? url('/api/photo/' . rawurlencode($user->profile_pic)) : null;
+        // Fetch all active photos for this user from users_images
+        $dbImages = \Illuminate\Support\Facades\DB::table('users_images')
+            ->where('user_id', $user->user_id)
+            ->where('is_active', 1)
+            ->orderByDesc('main')
+            ->orderBy('image_id', 'asc')
+            ->get();
+
+        if ($dbImages->isNotEmpty()) {
+            foreach ($dbImages as $row) {
+                $isMainPhoto = ((int) $row->main === 1) || (!empty($user->profile_pic) && $row->images === $user->profile_pic);
+                $localPath = $resolveLocalPhoto($row->images);
+
+                $photoUrl = $isBlurred
+                    ? url('/api/photo/blurred/' . rawurlencode($row->images))
+                    : url('/api/photo/' . rawurlencode($row->images));
+
+                if (!in_array($photoUrl, $allImages)) {
+                    $allImages[] = $photoUrl;
                 }
 
-                if ($imageUrl) {
-                    $allImages[] = $imageUrl;
-                }
+                $photosGallery[] = [
+                    'id' => $row->image_id,
+                    'filename' => $row->images,
+                    'url' => $photoUrl,
+                    'main' => $isMainPhoto ? 1 : 0,
+                ];
 
-                // Add secondary images only if unblurred
-                $dbImages = \Illuminate\Support\Facades\DB::table('users_images')
-                    ->where('user_id', $user->user_id)
-                    ->where('is_active', 1)
-                    ->get();
-
-                foreach ($dbImages as $row) {
-                    $path = $checkPhoto($row->images);
-                    if ($path && !in_array($path, $allImages)) {
-                        $allImages[] = $path;
-                    }
-                }
-
-                if (!empty($user->profile_pic1)) {
-                    $pic1 = $checkPhoto($user->profile_pic1);
-                    if ($pic1 && !in_array($pic1, $allImages)) {
-                        $allImages[] = $pic1;
+                if ($isMainPhoto && !$imageUrl) {
+                    $imageUrl = $photoUrl;
+                    $photoStreamUrl = $photoUrl;
+                    if (!$isBlurred && $localPath) {
+                        $mime = @mime_content_type($localPath) ?: 'image/jpeg';
+                        $fileBytes = @file_get_contents($localPath);
+                        if ($fileBytes) {
+                            $base64Photo = 'data:' . $mime . ';base64,' . base64_encode($fileBytes);
+                        }
                     }
                 }
             }
+        }
+
+        // Fallback for profile_pic not yet in users_images or if dbImages was empty
+        if (!empty($user->profile_pic) && empty($imageUrl)) {
+            $localPath = $resolveLocalPhoto($user->profile_pic);
+            $photoUrl = $isBlurred
+                ? url('/api/photo/blurred/' . rawurlencode($user->profile_pic))
+                : url('/api/photo/' . rawurlencode($user->profile_pic));
+
+            $imageUrl = $photoUrl;
+            $photoStreamUrl = $photoUrl;
+            if (!$isBlurred && $localPath) {
+                $mime = @mime_content_type($localPath) ?: 'image/jpeg';
+                $fileBytes = @file_get_contents($localPath);
+                if ($fileBytes) {
+                    $base64Photo = 'data:' . $mime . ';base64,' . base64_encode($fileBytes);
+                }
+            }
+            if (!in_array($photoUrl, $allImages)) {
+                array_unshift($allImages, $photoUrl);
+            }
+            if (empty($photosGallery)) {
+                $photosGallery[] = [
+                    'id' => 0,
+                    'filename' => $user->profile_pic,
+                    'url' => $photoUrl,
+                    'main' => 1,
+                ];
+            }
+        }
+
+        if (!$imageUrl && !empty($allImages)) {
+            $imageUrl = $allImages[0];
+            $photoStreamUrl = $allImages[0];
         }
 
         // Format City
@@ -839,6 +865,7 @@ class ProfileApiController extends Controller
             'photo_stream_url' => $photoStreamUrl,
             'images' => $allImages,
             'images_count' => count($allImages),
+            'photos_gallery' => $photosGallery,
             
             // Access control and visibility flags
             'is_blurred' => $isBlurred,
@@ -946,6 +973,10 @@ class ProfileApiController extends Controller
             $inputData = json_decode($request->getContent(), true) ?: $request->all();
         }
 
+        if (isset($inputData['preferred_location']) && !isset($inputData['prefered_location'])) {
+            $inputData['prefered_location'] = $inputData['preferred_location'];
+        }
+
         // Validate allowed editable fields
         $validator = Validator::make($inputData, [
             'name' => 'sometimes|required|string|min:2|max:30',
@@ -1016,9 +1047,10 @@ class ProfileApiController extends Controller
             'additional_info',
         ];
 
+        $existingColumns = \Illuminate\Support\Facades\Schema::getColumnListing('users');
         $updatedCount = 0;
         foreach ($allowedFields as $field) {
-            if (array_key_exists($field, $inputData)) {
+            if (array_key_exists($field, $inputData) && in_array($field, $existingColumns)) {
                 $val = $inputData[$field];
                 $user->$field = is_string($val) ? trim($val) : $val;
                 $updatedCount++;
@@ -1188,10 +1220,28 @@ class ProfileApiController extends Controller
             if (file_exists($pubDir)) {
                 @copy($destDir . '/' . $filename, $pubDir . '/' . $filename);
             }
+            $uploadsDir = public_path('uploads');
+            if (file_exists($uploadsDir)) {
+                @copy($destDir . '/' . $filename, $uploadsDir . '/' . $filename);
+            }
 
             $user->profile_pic = $filename;
             $user->modified_at = now();
             $user->save();
+
+            // Synchronize with users_images table
+            \Illuminate\Support\Facades\DB::table('users_images')
+                ->where('user_id', $user->user_id)
+                ->update(['main' => 0]);
+
+            \Illuminate\Support\Facades\DB::table('users_images')->insert([
+                'user_id' => $user->user_id,
+                'images' => $filename,
+                'main' => 1,
+                'is_active' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
 
             if (session('user_id') == $user->user_id) {
                 session([
@@ -1203,7 +1253,7 @@ class ProfileApiController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Profile photo updated successfully.',
-                'photo_url' => asset('storage/users/' . $filename),
+                'photo_url' => url('/api/photo/' . rawurlencode($filename)),
                 'data' => $this->formatUserProfile($user->fresh(), true),
             ], 200);
         }
@@ -1212,6 +1262,257 @@ class ProfileApiController extends Controller
             'success' => false,
             'message' => 'No image file found in the request.',
         ], 422);
+    }
+
+    /**
+     * Add one or more additional profile photos into users_images.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function addPhotos(Request $request): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->attributes->get('authenticated_member');
+        if (!$user) {
+            $userId = session('user_id');
+            if ($userId) {
+                $user = User::where('user_id', $userId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+            }
+        }
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated. Active member session is required.',
+            ], 401);
+        }
+
+        // Collect all files from possible input keys (photos, photos[], images, images[], photo)
+        $files = [];
+        if ($request->hasFile('photos')) {
+            $f = $request->file('photos');
+            $files = is_array($f) ? $f : [$f];
+        } elseif ($request->hasFile('images')) {
+            $f = $request->file('images');
+            $files = is_array($f) ? $f : [$f];
+        } elseif ($request->hasFile('photo')) {
+            $files = [$request->file('photo')];
+        }
+
+        if (empty($files)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please select at least one photo to upload.',
+            ], 422);
+        }
+
+        $destDir = storage_path('app/public/users');
+        if (!file_exists($destDir)) {
+            @mkdir($destDir, 0777, true);
+        }
+        $pubDir = public_path('storage/users');
+        if (!file_exists($pubDir)) {
+            @mkdir($pubDir, 0777, true);
+        }
+        $uploadsDir = public_path('uploads');
+        if (!file_exists($uploadsDir)) {
+            @mkdir($uploadsDir, 0777, true);
+        }
+
+        $uploadedCount = 0;
+        $hasMain = \Illuminate\Support\Facades\DB::table('users_images')
+            ->where('user_id', $user->user_id)
+            ->where('main', 1)
+            ->where('is_active', 1)
+            ->exists();
+
+        foreach ($files as $idx => $file) {
+            if (!$file || !$file->isValid()) continue;
+
+            $ext = strtolower($file->getClientOriginalExtension());
+            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])) {
+                continue;
+            }
+
+            $cleanName = preg_replace('/[^a-zA-Z0-9._-]/', '_', $file->getClientOriginalName());
+            $filename = time() . '-img' . ($idx + 1) . '-' . uniqid() . '.' . $ext;
+
+            $file->move($destDir, $filename);
+            @copy($destDir . '/' . $filename, $pubDir . '/' . $filename);
+            @copy($destDir . '/' . $filename, $uploadsDir . '/' . $filename);
+
+            $isMain = (!$hasMain && empty($user->profile_pic) && $uploadedCount === 0) ? 1 : 0;
+            if ($isMain) {
+                $user->profile_pic = $filename;
+                $user->save();
+                $hasMain = true;
+            } elseif (empty($user->profile_pic1)) {
+                $user->profile_pic1 = $filename;
+                $user->save();
+            }
+
+            \Illuminate\Support\Facades\DB::table('users_images')->insert([
+                'user_id' => $user->user_id,
+                'images' => $filename,
+                'main' => $isMain,
+                'is_active' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            $uploadedCount++;
+        }
+
+        if ($uploadedCount === 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No valid images could be uploaded. Please select JPEG, PNG, or WebP files under 5MB.',
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => "{$uploadedCount} photo(s) added successfully.",
+            'data' => $this->formatUserProfile($user->fresh(), true),
+        ], 200);
+    }
+
+    /**
+     * Delete a photo from users_images.
+     *
+     * @param Request $request
+     * @param int|string $id
+     * @return JsonResponse
+     */
+    public function deletePhoto(Request $request, $id): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->attributes->get('authenticated_member');
+        if (!$user) {
+            $userId = session('user_id');
+            if ($userId) {
+                $user = User::where('user_id', $userId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+            }
+        }
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        $record = \Illuminate\Support\Facades\DB::table('users_images')
+            ->where('image_id', $id)
+            ->where('user_id', $user->user_id)
+            ->first();
+
+        if (!$record) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Photo not found or already deleted.',
+            ], 404);
+        }
+
+        $wasMain = ((int) $record->main === 1) || ($user->profile_pic === $record->images);
+
+        // Delete from users_images table
+        \Illuminate\Support\Facades\DB::table('users_images')
+            ->where('image_id', $id)
+            ->delete();
+
+        // If it was the main picture, designate next active picture as main
+        if ($wasMain) {
+            $next = \Illuminate\Support\Facades\DB::table('users_images')
+                ->where('user_id', $user->user_id)
+                ->where('is_active', 1)
+                ->orderBy('image_id', 'asc')
+                ->first();
+
+            if ($next) {
+                \Illuminate\Support\Facades\DB::table('users_images')
+                    ->where('image_id', $next->image_id)
+                    ->update(['main' => 1]);
+                $user->profile_pic = $next->images;
+            } else {
+                $user->profile_pic = null;
+            }
+            $user->save();
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Photo removed successfully.',
+            'data' => $this->formatUserProfile($user->fresh(), true),
+        ], 200);
+    }
+
+    /**
+     * Set a photo as main profile photo.
+     *
+     * @param Request $request
+     * @param int|string $id
+     * @return JsonResponse
+     */
+    public function setMainPhoto(Request $request, $id): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->attributes->get('authenticated_member');
+        if (!$user) {
+            $userId = session('user_id');
+            if ($userId) {
+                $user = User::where('user_id', $userId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+            }
+        }
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        $record = \Illuminate\Support\Facades\DB::table('users_images')
+            ->where('image_id', $id)
+            ->where('user_id', $user->user_id)
+            ->first();
+
+        if (!$record) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Photo not found.',
+            ], 404);
+        }
+
+        \Illuminate\Support\Facades\DB::table('users_images')
+            ->where('user_id', $user->user_id)
+            ->update(['main' => 0]);
+
+        \Illuminate\Support\Facades\DB::table('users_images')
+            ->where('image_id', $id)
+            ->update(['main' => 1]);
+
+        $user->profile_pic = $record->images;
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Profile picture set as main photo successfully.',
+            'data' => $this->formatUserProfile($user->fresh(), true),
+        ], 200);
     }
 
     /**
@@ -1250,6 +1551,34 @@ class ProfileApiController extends Controller
     }
 
     /**
+     * Find local file path across multiple possible storage directories.
+     *
+     * @param string $filename
+     * @return string|null
+     */
+    public function findLocalPhotoPath(string $filename): ?string
+    {
+        $filename = basename($filename);
+        if (empty($filename)) return null;
+
+        $candidates = [
+            storage_path('app/public/users/' . $filename),
+            public_path('storage/users/' . $filename),
+            public_path('uploads/' . $filename),
+            public_path('uploads/user-image/' . $filename),
+            public_path('uploads/users/' . $filename),
+        ];
+
+        foreach ($candidates as $cand) {
+            if (file_exists($cand) && is_file($cand)) {
+                return $cand;
+            }
+        }
+
+        return $this->tryFetchRemotePhoto($filename);
+    }
+
+    /**
      * Serve blurred version of profile photo.
      * Uses PHP GD multi-pass downscale & Gaussian blur with caching to storage/app/public/blurred/.
      *
@@ -1259,10 +1588,7 @@ class ProfileApiController extends Controller
     public function getBlurredPhoto(string $filename)
     {
         $filename = basename($filename);
-        $sourcePath = storage_path('app/public/users/' . $filename);
-        if (!file_exists($sourcePath) || !is_file($sourcePath)) {
-            $sourcePath = $this->tryFetchRemotePhoto($filename);
-        }
+        $sourcePath = $this->findLocalPhotoPath($filename);
 
         if (!$sourcePath) {
             return $this->serveNeutralAvatar();
@@ -1357,22 +1683,64 @@ class ProfileApiController extends Controller
         }
 
         $filename = basename($filename);
-        $path = storage_path('app/public/users/' . $filename);
-        if (!file_exists($path) || !is_file($path)) {
-            $path = $this->tryFetchRemotePhoto($filename);
+        $path = $this->findLocalPhotoPath($filename);
+
+        if (!$path || !file_exists($path) || !is_file($path)) {
+            return $this->serveNeutralAvatar();
         }
 
-        if ($path && file_exists($path) && is_file($path)) {
-            $mime = @mime_content_type($path) ?: 'image/jpeg';
-            return response()->file($path, [
-                'Content-Type' => $mime,
-                'Access-Control-Allow-Origin' => '*',
-                'Access-Control-Allow-Methods' => 'GET, OPTIONS',
-                'Cache-Control' => 'public, max-age=86400',
-            ]);
+        // =====================================================================
+        // AUTHORIZATION-CHECKED PHOTO SERVING (Protected Member Images)
+        // =====================================================================
+        $viewer = $this->resolveViewer($request);
+
+        // Find which member profile owns this photo
+        $owner = User::where('profile_pic', $filename)
+            ->orWhere('profile_pic1', $filename)
+            ->first();
+
+        if (!$owner) {
+            $dbImg = \Illuminate\Support\Facades\DB::table('users_images')->where('images', $filename)->first();
+            if ($dbImg) {
+                $owner = User::where('user_id', $dbImg->user_id)->first();
+            }
         }
 
-        return $this->serveNeutralAvatar();
+        $isAuthorized = false;
+
+        // 1. Admin session is always authorized
+        if (session('is_admin', false)) {
+            $isAuthorized = true;
+        }
+
+        // 2. Member viewing their own photo
+        if (!$isAuthorized && $viewer && $owner && (int) $viewer->user_id === (int) $owner->user_id) {
+            $isAuthorized = true;
+        }
+
+        // 3. Verified member with an active package
+        if (!$isAuthorized && $viewer && ((int) ($viewer->is_verified ?? 0) === 1) && $viewer->isPackageActive()) {
+            $isAuthorized = true;
+        }
+
+        // 4. Viewer has already viewed/unlocked this profile
+        if (!$isAuthorized && $viewer && $owner && $viewer->hasViewedProfile($owner->user_id)) {
+            $isAuthorized = true;
+        }
+
+        // If not authorized to view raw original photo, automatically serve privacy-protected BLURRED version
+        if (!$isAuthorized && $owner) {
+            return $this->getBlurredPhoto($filename);
+        }
+
+        $mime = @mime_content_type($path) ?: 'image/jpeg';
+        return response()->file($path, [
+            'Content-Type' => $mime,
+            'Access-Control-Allow-Origin' => '*',
+            'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => 'private, max-age=3600',
+        ]);
     }
 
     /**
