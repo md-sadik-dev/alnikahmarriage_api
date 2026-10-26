@@ -23,7 +23,7 @@ Route::get('/', function () {
 });
 
 // Authentication Web Aliases (forwarding to API controller)
-Route::post('/login', [AuthApiController::class, 'login'])->name('login.post');
+Route::post('/login', [AuthApiController::class, 'login'])->middleware('throttle:5,1')->name('login.post');
 Route::post('/signup', [AuthApiController::class, 'register'])->name('signup.post');
 Route::post('/register', [AuthApiController::class, 'register'])->name('register.post');
 Route::get('/logout', [AuthApiController::class, 'logout'])->name('logout.get');
@@ -33,6 +33,10 @@ Route::post('/feedback', [PageController::class, 'submitFeedback'])->name('feedb
 
 Route::get('api/photo/blurred/{filename}', [ProfileApiController::class, 'getBlurredPhoto']);
 Route::get('api/photo/{filename}', [ProfileApiController::class, 'getPhoto']);
+
+// Route direct storage/users and uploads access through the authorization-checked endpoint
+Route::get('storage/users/{filename}', [ProfileApiController::class, 'getPhoto']);
+Route::get('uploads/{filename}', [ProfileApiController::class, 'getPhoto']);
 
 // Web prefix API fallbacks for backwards compatibility
 Route::prefix('api/profiles')->group(function () {

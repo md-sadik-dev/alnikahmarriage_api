@@ -9,6 +9,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 
 class AuthApiController extends Controller
 {
@@ -47,8 +49,30 @@ class AuthApiController extends Controller
                 ->withInput();
         }
 
-        $loginInput = trim($inputData['username'] ?? $request->input('username'));
-        $password = trim($inputData['password'] ?? $request->input('password'));
+        $loginInput = trim($inputData['username'] ?? $request->input('username', ''));
+        $password = trim($inputData['password'] ?? $request->input('password', ''));
+
+        // Security Rate Limiting: Maximum 5 login attempts per 60 seconds
+        $ip = $request->ip();
+        $throttleKey = 'login:' . Str::lower($loginInput) . '|' . $ip;
+        $ipThrottleKey = 'login_ip:' . $ip;
+
+        if (RateLimiter::tooManyAttempts($throttleKey, 5) || RateLimiter::tooManyAttempts($ipThrottleKey, 5)) {
+            $seconds = max(RateLimiter::availableIn($throttleKey), RateLimiter::availableIn($ipThrottleKey));
+            $rateLimitMsg = "Too many login attempts. Please wait {$seconds} seconds before trying again.";
+
+            if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $rateLimitMsg,
+                    'retry_after' => $seconds,
+                ], 429);
+            }
+
+            return redirect()->back()
+                ->with('error', $rateLimitMsg)
+                ->withInput($request->except('password'));
+        }
 
         try {
             // 1. Check in Admin table first
@@ -62,6 +86,10 @@ class AuthApiController extends Controller
                 $adminPasswordMatch = self::verifyPassword($password, $admin->password);
 
                 if ($adminPasswordMatch) {
+                    // Clear rate limiting upon successful admin login
+                    RateLimiter::clear($throttleKey);
+                    RateLimiter::clear($ipThrottleKey);
+
                     // Log admin session
                     session([
                         'is_admin' => true,
@@ -122,6 +150,10 @@ class AuthApiController extends Controller
                     || ($password === 'Nikah@123'); // Demo fallback password for legacy imported records
 
                 if ($passwordMatch) {
+                    // Clear rate limiting upon successful member login
+                    RateLimiter::clear($throttleKey);
+                    RateLimiter::clear($ipThrottleKey);
+
                     // Store user session with both modern and legacy session keys
                     $isExpired = $user->isPackageExpired();
                     session([
@@ -180,13 +212,28 @@ class AuthApiController extends Controller
                 }
             }
 
-            // 3. Failed Authentication
-            $errMsg = 'Invalid credentials. Please check your username/email and password.';
+            // 3. Failed Authentication - Hit Rate Limiter
+            RateLimiter::hit($throttleKey, 60);
+            RateLimiter::hit($ipThrottleKey, 60);
+
+            $attempts = max(RateLimiter::attempts($throttleKey), RateLimiter::attempts($ipThrottleKey));
+            $remaining = max(0, 5 - $attempts);
+
+            if ($remaining > 0) {
+                $errMsg = "Invalid credentials. Please check your username and password. ({$remaining} attempts remaining)";
+                $statusCode = 401;
+            } else {
+                $seconds = max(RateLimiter::availableIn($throttleKey), RateLimiter::availableIn($ipThrottleKey));
+                $errMsg = "Too many failed login attempts. Please wait {$seconds} seconds before trying again.";
+                $statusCode = 429;
+            }
+
             if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
                 return response()->json([
                     'success' => false,
                     'message' => $errMsg,
-                ], 401);
+                    'remaining_attempts' => $remaining,
+                ], $statusCode);
             }
 
             return redirect()->back()
@@ -196,12 +243,22 @@ class AuthApiController extends Controller
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::error('Authentication error: ' . $e->getMessage());
 
-            $errMsg = 'Invalid credentials. Please check your username/email and password.';
+            RateLimiter::hit($throttleKey, 60);
+            RateLimiter::hit($ipThrottleKey, 60);
+
+            $attempts = max(RateLimiter::attempts($throttleKey), RateLimiter::attempts($ipThrottleKey));
+            $remaining = max(0, 5 - $attempts);
+            $statusCode = ($remaining > 0) ? 401 : 429;
+            $errMsg = ($remaining > 0)
+                ? "Invalid credentials. Please check your username and password. ({$remaining} attempts remaining)"
+                : "Too many failed login attempts. Please wait 60 seconds before trying again.";
+
             if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
                 return response()->json([
                     'success' => false,
                     'message' => $errMsg,
-                ], 401);
+                    'remaining_attempts' => $remaining,
+                ], $statusCode);
             }
 
             return redirect()->back()
@@ -272,10 +329,14 @@ class AuthApiController extends Controller
         if (empty($inputData['password_confirmation']) && !empty($inputData['confirm_password'])) {
             $inputData['password_confirmation'] = $inputData['confirm_password'];
         }
+        if (empty($inputData['prefered_location']) && !empty($inputData['preferred_location'])) {
+            $inputData['prefered_location'] = $inputData['preferred_location'];
+        }
 
         $validator = Validator::make($inputData, [
             'name' => 'required|string|min:2|max:100',
             'mobile' => 'required|string|min:10|max:15',
+            'alternate_mobile' => 'nullable|string|max:15',
             'password' => 'required|string|min:6|max:50|confirmed',
             'password_confirmation' => 'required|string|min:6|max:50',
             'user_type' => 'nullable|string|in:GROOM,BRIDE,Groom,Bride,groom,bride',
@@ -440,6 +501,7 @@ class AuthApiController extends Controller
         $user->user_type = $userType;
         $user->name = trim($inputData['name'] ?? '');
         $user->mobile = trim($inputData['mobile'] ?? '');
+        $user->alternate_mobile = !empty($inputData['alternate_mobile']) ? trim($inputData['alternate_mobile']) : null;
         $user->email = $inputData['email'] ?? $profileId;
         $user->password = trim($inputData['password']);
         $user->dob = $inputData['dob'] ?? '25 Years';
@@ -456,9 +518,9 @@ class AuthApiController extends Controller
         $user->m_name = $inputData['m_name'] ?? 'Confidential';
         $user->sister = $inputData['sister'] ?? '0';
         $user->brother = $inputData['brother'] ?? '0';
-        $user->address = $inputData['address'] ?? ($inputData['city'] ?? 'Lucknow');
-        $user->n_address = $inputData['n_address'] ?? ($inputData['native_place'] ?? ($inputData['city'] ?? 'Lucknow'));
-        $user->prefered_location = $inputData['prefered_location'] ?? 'All';
+        $user->address = $inputData['address'] ?? ($inputData['city'] ?? null);
+        $user->prefered_location = $inputData['prefered_location'] ?? ($inputData['preferred_location'] ?? 'All');
+        $user->n_address = $inputData['n_address'] ?? ($inputData['native_place'] ?? ($user->prefered_location ?: ($inputData['city'] ?? null)));
 
         // Membership Package Business Logic:
         // Free registration is 100% free with immediate access.
@@ -473,8 +535,10 @@ class AuthApiController extends Controller
         if (strtoupper($requestedPackage) !== 'FREE REGISTRATION' && strtoupper($requestedPackage) !== 'FREE') {
             $targetPlan = \App\Models\Plan::where('is_active', 1)
                 ->where(function ($q) use ($requestedPackage) {
-                    $q->where('plan_name', 'LIKE', $requestedPackage)
-                      ->orWhere('plan_id', $requestedPackage);
+                    $q->where('plan_name', 'LIKE', $requestedPackage);
+                    if (is_numeric($requestedPackage)) {
+                        $q->orWhere('plan_id', (int) $requestedPackage);
+                    }
                 })
                 ->first();
             if ($targetPlan && strtoupper(trim($targetPlan->plan_name)) !== 'FREE REGISTRATION') {
