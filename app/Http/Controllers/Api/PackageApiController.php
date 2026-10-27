@@ -247,7 +247,29 @@ class PackageApiController extends Controller
         $formattedUser['is_package_active'] = true;
         $formattedUser['is_package_expired'] = false;
         $formattedUser['unlocked_profile_limit'] = $user->getUnlockedProfileCount();
-        $formattedUser['profile_view_limits'] = $user->getProfileViewLimits();
+        $txnId = $request->input('transaction_id') ?: ('TXN' . strtoupper(substr(md5(uniqid((string)$user->user_id, true)), 0, 10)));
+        $paymentMethod = $request->input('payment_method', 'Online Payment / UPI');
+
+        try {
+            \App\Models\Payment::create([
+                'transaction_id' => $txnId,
+                'user_id' => $user->user_id,
+                'profile_id' => $user->profile_id,
+                'user_name' => $user->name,
+                'user_email' => $user->email,
+                'user_mobile' => $user->mobile,
+                'plan_id' => $plan->plan_id,
+                'plan_name' => $plan->plan_name,
+                'amount' => $offerPrice,
+                'currency' => 'INR',
+                'payment_method' => $paymentMethod,
+                'gateway' => 'internal',
+                'payment_status' => 'SUCCESS',
+                'activated_at' => Carbon::now(),
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Failed to record payment in DB: ' . $e->getMessage());
+        }
 
         return response()->json([
             'success' => true,
@@ -270,8 +292,8 @@ class PackageApiController extends Controller
                 'package_limit' => (int) ($plan->package_limit ?? 30),
                 'daily_limit' => (int) ($plan->daily_limit ?? 2),
                 'payment_status' => 'SUCCESS',
-                'payment_method' => $request->input('payment_method', 'Online Payment / UPI'),
-                'transaction_id' => $request->input('transaction_id', 'TXN' . strtoupper(uniqid())),
+                'payment_method' => $paymentMethod,
+                'transaction_id' => $txnId,
                 'activated_at' => Carbon::now()->toDateTimeString(),
             ],
         ], 200);

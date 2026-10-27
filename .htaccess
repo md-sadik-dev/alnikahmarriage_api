@@ -5,6 +5,10 @@
 
     RewriteEngine On
 
+    # Block sensitive files and private folders
+    RewriteRule (^|/)\.(env|git) - [F,L,NC]
+    RewriteRule ^storage/credentials - [F,L,NC]
+
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]

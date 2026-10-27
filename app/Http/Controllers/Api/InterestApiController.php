@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Interest;
 use App\Models\User;
+use App\Services\NotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -254,6 +255,12 @@ class InterestApiController extends Controller
                 // Partner had sent interest to current user; auto-accept!
                 $existing->status = 1;
                 $existing->save();
+
+                // Dispatch notification to partner that their interest was accepted
+                try {
+                    app(NotificationService::class)->notifyInterestAccepted($existing);
+                } catch (\Throwable $e) {}
+
                 return response()->json([
                     'success' => true,
                     'is_mutual' => true,
@@ -270,6 +277,11 @@ class InterestApiController extends Controller
             'created_at' => now(),
         ]);
 
+        // Dispatch browser push notification to candidate recipient
+        try {
+            app(NotificationService::class)->notifyInterestReceived($interest);
+        } catch (\Throwable $e) {}
+
         return response()->json([
             'success' => true,
             'message' => "Alhamdulillah! Your interest has been sent to {$targetUser->name}.",
@@ -278,6 +290,7 @@ class InterestApiController extends Controller
                 'status' => 0,
             ],
         ], 201);
+
     }
 
     /**
@@ -308,8 +321,14 @@ class InterestApiController extends Controller
         $interest->status = 1;
         $interest->save();
 
+        // Dispatch browser push notification to sender that their proposal was accepted
+        try {
+            app(NotificationService::class)->notifyInterestAccepted($interest);
+        } catch (\Throwable $e) {}
+
         $sender = $interest->sender;
         $contactMobile = $sender && !empty($sender->mobile) ? $sender->mobile : 'Registered Contact';
+
 
         return response()->json([
             'success' => true,

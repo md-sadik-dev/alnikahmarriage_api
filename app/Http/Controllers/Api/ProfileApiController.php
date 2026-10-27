@@ -8,6 +8,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Api\AuthApiController;
 
 class ProfileApiController extends Controller
@@ -918,6 +920,11 @@ class ProfileApiController extends Controller
             'work' => !empty(trim($user->work ?? '')) ? trim($user->work) : '',
             'additional_info' => !empty(trim($user->additional_info ?? '')) ? trim($user->additional_info) : '',
             'prefered_location' => !empty(trim($user->prefered_location ?? '')) ? trim($user->prefered_location) : '',
+            'delete_request' => (int) ($user->delete_request ?? 0),
+            'delete_approved' => (int) ($user->delete_approved ?? 0),
+            'delete_reason' => $user->delete_reason ?? null,
+            'delete_requested_at' => $user->delete_requested_at ? (string) $user->delete_requested_at : null,
+            'delete_approved_at' => $user->delete_approved_at ? (string) $user->delete_approved_at : null,
         ];
 
         if ($detailed) {
@@ -1159,6 +1166,229 @@ class ProfileApiController extends Controller
             'message' => 'Password has been updated successfully.',
         ], 200);
     }
+
+    /**
+     * Submit request to permanently delete account (requires admin approval).
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function requestPermanentDelete(Request $request): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->attributes->get('authenticated_member');
+        if (!$user) {
+            $userId = session('user_id');
+            if ($userId) {
+                $user = User::where('user_id', $userId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+            }
+        }
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated. Active member session is required.',
+            ], 401);
+        }
+
+        $inputData = $request->isJson() ? $request->json()->all() : $request->all();
+        if (empty($inputData)) {
+            $inputData = json_decode($request->getContent(), true) ?: $request->all();
+        }
+
+        $reason = trim($inputData['reason'] ?? ($inputData['delete_reason'] ?? 'Personal reasons'));
+        if (empty($reason)) {
+            $reason = 'Personal reasons';
+        }
+
+        $user->delete_request = 1;
+        $user->delete_reason = substr($reason, 0, 255);
+        $user->delete_requested_at = now();
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Permanent deletion request submitted successfully. It is now awaiting Administrator review & approval.',
+            'data' => [
+                'delete_request' => 1,
+                'delete_approved' => (int) ($user->delete_approved ?? 0),
+                'delete_reason' => $user->delete_reason,
+                'delete_requested_at' => (string) $user->delete_requested_at,
+            ],
+        ], 200);
+    }
+
+    /**
+     * Cancel a pending permanent delete request.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function cancelPermanentDeleteRequest(Request $request): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->attributes->get('authenticated_member');
+        if (!$user) {
+            $userId = session('user_id');
+            if ($userId) {
+                $user = User::where('user_id', $userId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+            }
+        }
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated. Active member session is required.',
+            ], 401);
+        }
+
+        $user->delete_request = 0;
+        $user->delete_reason = null;
+        $user->delete_requested_at = null;
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Permanent deletion request has been cancelled.',
+            'data' => [
+                'delete_request' => 0,
+                'delete_approved' => (int) ($user->delete_approved ?? 0),
+            ],
+        ], 200);
+    }
+
+    /**
+     * Permanently delete account and all associated profile data.
+     * STRICT REQUIREMENT: Only executes if Administrator has approved deletion (`delete_approved` === 1).
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function permanentDeleteAccount(Request $request): JsonResponse
+    {
+        /** @var User|null $user */
+        $user = $request->attributes->get('authenticated_member');
+        if (!$user) {
+            $userId = session('user_id');
+            if ($userId) {
+                $user = User::where('user_id', $userId)
+                    ->where(function ($q) {
+                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+                    })
+                    ->first();
+            }
+        }
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated. Active member session is required.',
+            ], 401);
+        }
+
+        // 1. STRICT CHECK: Admin Approval is mandatory!
+        if ((int) ($user->delete_approved ?? 0) !== 1) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Permanent account deletion cannot proceed because Administrator approval has not been granted yet. Please wait for Admin approval.',
+                'error_code' => 'ADMIN_APPROVAL_REQUIRED',
+            ], 403);
+        }
+
+        $inputData = $request->isJson() ? $request->json()->all() : $request->all();
+        if (empty($inputData)) {
+            $inputData = json_decode($request->getContent(), true) ?: $request->all();
+        }
+
+        // 2. Validate Password for Security
+        $password = $inputData['password'] ?? '';
+        if (empty($password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please enter your account password to confirm permanent deletion.',
+                'errors' => ['password' => ['Password is required to confirm permanent account deletion.']],
+            ], 422);
+        }
+
+        if (!AuthApiController::verifyPassword($password, $user->password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'The password you entered is incorrect. Account permanent deletion cancelled.',
+                'errors' => ['password' => ['Incorrect password.']],
+            ], 422);
+        }
+
+        $userId = $user->user_id;
+
+        // 3. Remove physical photo files
+        try {
+            $userImages = DB::table('users_images')->where('user_id', $userId)->pluck('images')->toArray();
+            if (!empty($user->profile_pic)) {
+                $userImages[] = $user->profile_pic;
+            }
+            if (!empty($user->profile_pic1)) {
+                $userImages[] = $user->profile_pic1;
+            }
+
+            foreach (array_unique(array_filter($userImages)) as $imgFile) {
+                $filename = basename($imgFile);
+                $paths = [
+                    storage_path('app/public/users/' . $filename),
+                    public_path('storage/users/' . $filename),
+                    public_path('uploads/' . $filename),
+                    public_path('uploads/user-image/' . $filename),
+                    public_path('uploads/users/' . $filename),
+                ];
+                foreach ($paths as $p) {
+                    if (file_exists($p)) {
+                        @unlink($p);
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            \Log::warning('Error deleting user image files during permanent deletion: ' . $e->getMessage());
+        }
+
+        // 4. Clean up all associated database records
+        try {
+            DB::table('users_images')->where('user_id', $userId)->delete();
+            DB::table('interest')->where('user_id', $userId)->orWhere('sender_id', $userId)->delete();
+            DB::table('profile_views')->where('viewer_user_id', $userId)->orWhere('profile_user_id', $userId)->delete();
+            DB::table('profile_view_limits')->where('viewer_user_id', $userId)->delete();
+            DB::table('shortlisted')->where('user_id', $userId)->orWhere('listed_id', $userId)->delete();
+            DB::table('recent_visitors')->where('user_id', $userId)->orWhere('visitor_id', $userId)->delete();
+            DB::table('viewed_profile')->where('user_id', $userId)->orWhere('viewer_id', $userId)->delete();
+            DB::table('login_history')->where('user_id', $userId)->delete();
+            DB::table('career_details')->where('user_id', $userId)->delete();
+            DB::table('family_details')->where('user_id', $userId)->delete();
+        } catch (\Throwable $e) {
+            \Log::warning('Error cleaning up associated user tables: ' . $e->getMessage());
+        }
+
+        // 5. Permanently delete the user record
+        DB::table('users')->where('user_id', $userId)->delete();
+
+        // 6. Invalidate and clear member session
+        try {
+            session()->forget(['user_id', 'authenticated_member', 'user_email', 'user_name']);
+            session()->flush();
+            session()->regenerate(true);
+        } catch (\Throwable $e) {}
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Your account and all associated profile data have been permanently deleted from Al-Nikah.',
+        ], 200);
+    }
+
 
     /**
      * Upload and update profile photo for authenticated member.
