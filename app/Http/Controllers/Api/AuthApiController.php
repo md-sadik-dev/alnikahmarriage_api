@@ -90,13 +90,24 @@ class AuthApiController extends Controller
                     RateLimiter::clear($throttleKey);
                     RateLimiter::clear($ipThrottleKey);
 
-                    // Log admin session
+                    // Determine role: super_admin or operator
+                    $adminRole = 'operator';
+                    $adminTypeLower = strtolower($admin->type ?? '');
+                    if (($admin->role ?? '') === 'super_admin' 
+                        || str_contains($adminTypeLower, 'super') 
+                        || str_contains($adminTypeLower, 'master') 
+                        || (int)$admin->id === 1) {
+                        $adminRole = 'super_admin';
+                    }
+
+                    // Log admin/operator session
                     session([
-                        'is_admin' => true,
+                        'is_admin' => ($adminRole === 'super_admin'),
+                        'is_operator' => ($adminRole === 'operator'),
                         'admin_id' => $admin->id,
                         'admin_username' => $admin->username,
                         'admin_email' => $admin->email,
-                        'role' => 'admin',
+                        'role' => $adminRole,
                     ]);
 
                     // Update login date
@@ -114,16 +125,18 @@ class AuthApiController extends Controller
                         'username' => $admin->username,
                         'email' => $admin->email,
                         'mobile' => $admin->mobile,
-                        'role' => 'admin',
-                        'type' => $admin->type ?? 'Master Admin',
+                        'role' => $adminRole,
+                        'type' => $admin->type ?? ($adminRole === 'super_admin' ? 'Master Admin' : 'Operator'),
                     ];
+
+                    $redirectUrl = url('/alnikah@1357admin/home.php');
 
                     if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
                         return response()->json([
                             'success' => true,
-                            'message' => 'Admin authentication successful.',
-                            'role' => 'admin',
-                            'redirect_url' => url('/dashboard'),
+                            'message' => ($adminRole === 'super_admin' ? 'Super Admin' : 'Operator') . ' authentication successful.',
+                            'role' => $adminRole,
+                            'redirect_url' => $redirectUrl,
                             'user' => $adminData,
                         ]);
                     }
@@ -171,7 +184,7 @@ class AuthApiController extends Controller
                         'end_date' => $user->end_date,
                         'is_package_active' => !$isExpired,
                         'user' => $user->toArray(),
-                        'role' => 'user',
+                        'role' => 'customer',
                     ]);
                     \Illuminate\Support\Facades\Auth::login($user);
 
@@ -188,7 +201,7 @@ class AuthApiController extends Controller
 
                     $profileController = new ProfileApiController();
                     $userData = $profileController->formatUserProfile($user, true);
-                    $userData['role'] = 'user';
+                    $userData['role'] = 'customer';
                     $userData['is_active'] = (int) $user->is_active;
                     $userData['is_verified'] = (int) $user->is_verified;
                     $userData['is_package_active'] = !$isExpired;
@@ -200,7 +213,7 @@ class AuthApiController extends Controller
                         return response()->json([
                             'success' => true,
                             'message' => 'Assalamu Alaikum! Welcome back, ' . ($user->name ?? 'Member') . '.',
-                            'role' => 'user',
+                            'role' => 'customer',
                             'redirect_url' => url('/dashboard'),
                             'is_package_active' => !$isExpired,
                             'is_package_expired' => $isExpired,
@@ -700,23 +713,41 @@ class AuthApiController extends Controller
     public function me(Request $request): JsonResponse
     {
         $userId = session('user_id');
-        $isAdmin = session('is_admin', false);
+        $adminId = session('admin_id');
 
-        if ($isAdmin) {
-            $admin = DB::table('admin')->where('id', session('admin_id'))->first();
-            return response()->json([
-                'success' => true,
-                'role' => 'admin',
-                'user' => $admin,
-            ]);
+        if ($adminId) {
+            $admin = DB::table('admin')->where('id', $adminId)->where('status', 1)->first();
+            if ($admin) {
+                $adminRole = 'operator';
+                $adminTypeLower = strtolower($admin->type ?? '');
+                if (($admin->role ?? '') === 'super_admin' 
+                    || str_contains($adminTypeLower, 'super') 
+                    || str_contains($adminTypeLower, 'master') 
+                    || (int)$admin->id === 1) {
+                    $adminRole = 'super_admin';
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'role' => $adminRole,
+                    'user' => [
+                        'id' => $admin->id,
+                        'username' => $admin->username,
+                        'email' => $admin->email,
+                        'mobile' => $admin->mobile,
+                        'role' => $adminRole,
+                        'type' => $admin->type ?? ($adminRole === 'super_admin' ? 'Master Admin' : 'Operator'),
+                    ],
+                ]);
+            }
         }
 
         if ($userId) {
             $user = User::find($userId);
-            if ($user) {
+            if ($user && empty($user->is_deleted)) {
                 $profileController = new ProfileApiController();
                 $formattedUser = $profileController->formatUserProfile($user, true);
-                $formattedUser['role'] = 'user';
+                $formattedUser['role'] = 'customer';
                 $formattedUser['is_verified'] = (int) $user->is_verified;
                 $formattedUser['unlocked_profile_limit'] = $user->getUnlockedProfileCount();
                 $formattedUser['is_package_active'] = !$user->isPackageExpired();
@@ -725,7 +756,7 @@ class AuthApiController extends Controller
 
                 return response()->json([
                     'success' => true,
-                    'role' => 'user',
+                    'role' => 'customer',
                     'user' => $formattedUser,
                 ]);
             }

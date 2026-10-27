@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\MetaApiController;
 use App\Http\Controllers\Api\GalleryApiController;
 use App\Http\Controllers\Api\BannerApiController;
 use App\Http\Controllers\Api\VideoApiController;
+use App\Http\Controllers\Api\NotificationApiController;
 
 /*
 |--------------------------------------------------------------------------
@@ -20,7 +21,6 @@ use App\Http\Controllers\Api\VideoApiController;
 // Authentication APIs (Login, Signup, Me, Logout)
 Route::post('/login', [AuthApiController::class, 'login'])->middleware('throttle:5,1')->name('api.login');
 Route::post('/signup', [AuthApiController::class, 'register'])->name('api.signup');
-Route::post('/register', [AuthApiController::class, 'register'])->name('api.register');
 Route::get('/me', [AuthApiController::class, 'me'])->name('api.me');
 Route::post('/logout', [AuthApiController::class, 'logout'])->name('api.logout');
 Route::get('/logout', [AuthApiController::class, 'logout'])->name('api.logout.get');
@@ -54,6 +54,9 @@ Route::middleware('auth.member')->group(function () {
     Route::match(['delete', 'post'], '/profile/photos/{id}/delete', [ProfileApiController::class, 'deletePhoto'])->name('api.profile.photos.delete.post');
     Route::delete('/profile/photos/{id}', [ProfileApiController::class, 'deletePhoto'])->name('api.profile.photos.delete');
     Route::post('/profile/change-password', [ProfileApiController::class, 'changePassword'])->name('api.profile.change-password');
+    Route::post('/profile/delete-request', [ProfileApiController::class, 'requestPermanentDelete'])->name('api.profile.delete-request');
+    Route::post('/profile/cancel-delete-request', [ProfileApiController::class, 'cancelPermanentDeleteRequest'])->name('api.profile.cancel-delete-request');
+    Route::match(['delete', 'post'], '/profile/permanent-delete', [ProfileApiController::class, 'permanentDeleteAccount'])->name('api.profile.permanent-delete');
 
     // Inbox & Interests Endpoints
     Route::prefix('interests')->group(function () {
@@ -66,7 +69,23 @@ Route::middleware('auth.member')->group(function () {
         Route::post('/{id}/decline', [InterestApiController::class, 'decline'])->name('api.interests.decline');
         Route::match(['delete', 'post'], '/{id}/cancel', [InterestApiController::class, 'cancel'])->name('api.interests.cancel');
     });
+
+    // Browser Push Notifications & History Endpoints
+    Route::prefix('notifications')->group(function () {
+        Route::get('/', [NotificationApiController::class, 'index'])->name('api.notifications.index');
+        Route::get('/unread-count', [NotificationApiController::class, 'unreadCount'])->name('api.notifications.unread-count');
+        Route::post('/subscribe', [NotificationApiController::class, 'subscribe'])->name('api.notifications.subscribe');
+        Route::post('/unsubscribe', [NotificationApiController::class, 'unsubscribe'])->name('api.notifications.unsubscribe');
+        Route::patch('/read-all', [NotificationApiController::class, 'markAllAsRead'])->name('api.notifications.read-all');
+        Route::post('/read-all', [NotificationApiController::class, 'markAllAsRead'])->name('api.notifications.read-all.post');
+        Route::patch('/{id}/read', [NotificationApiController::class, 'markAsRead'])->name('api.notifications.read');
+        Route::post('/{id}/read', [NotificationApiController::class, 'markAsRead'])->name('api.notifications.read.post');
+    });
 });
+
+// Public Notification Configuration (VAPID key & Web App Config)
+Route::get('/notifications/config', [NotificationApiController::class, 'config'])->name('api.notifications.config');
+
 
 // Membership Packages APIs
 Route::prefix('packages')->group(function () {
@@ -107,3 +126,37 @@ Route::get('/video-guides', [VideoApiController::class, 'index'])->name('api.vid
 
 // Contact / Feedback APIs
 Route::post('/feedback', [\App\Http\Controllers\PageController::class, 'submitFeedback'])->name('api.feedback.submit');
+
+use App\Http\Controllers\Api\OperatorApiController;
+
+// Operator & Admin Protected Routes (Role: Operator or Super Admin)
+Route::prefix('operator')->middleware('role:operator,super_admin')->group(function () {
+    // Dashboard Statistics
+    Route::get('/dashboard-stats', [OperatorApiController::class, 'dashboardStats'])->name('api.operator.dashboard-stats');
+
+    // All Users Management
+    Route::get('/users', [OperatorApiController::class, 'getUsers'])->name('api.operator.users.index');
+    Route::get('/users/{id}', [OperatorApiController::class, 'getUserDetails'])->name('api.operator.users.show');
+    Route::match(['put', 'post'], '/users/{id}', [OperatorApiController::class, 'updateUser'])->name('api.operator.users.update');
+
+    // Banner Management
+    Route::get('/banners', [OperatorApiController::class, 'getBanners'])->name('api.operator.banners.index');
+    Route::post('/banners', [OperatorApiController::class, 'storeBanner'])->name('api.operator.banners.store');
+    Route::match(['put', 'post'], '/banners/{id}', [OperatorApiController::class, 'updateBanner'])->name('api.operator.banners.update');
+    Route::post('/banners/{id}/status', [OperatorApiController::class, 'toggleBannerStatus'])->name('api.operator.banners.status');
+    Route::delete('/banners/{id}', [OperatorApiController::class, 'deleteBanner'])->name('api.operator.banners.delete');
+
+    // Gallery Management
+    Route::get('/gallery', [OperatorApiController::class, 'getGallery'])->name('api.operator.gallery.index');
+    Route::post('/gallery', [OperatorApiController::class, 'storeGallery'])->name('api.operator.gallery.store');
+    Route::delete('/gallery/{id}', [OperatorApiController::class, 'deleteGallery'])->name('api.operator.gallery.delete');
+
+    // Payment Management
+    Route::get('/payments', [OperatorApiController::class, 'getPayments'])->name('api.operator.payments.index');
+    Route::post('/payments/{id}/correct-status', [OperatorApiController::class, 'correctPaymentStatus'])->name('api.operator.payments.correct');
+});
+
+// Super Admin Only Protected Routes (Role: Super Admin)
+Route::prefix('admin-rbac')->middleware('role:super_admin')->group(function () {
+    Route::get('/audit-logs', [OperatorApiController::class, 'getAuditLogs'])->name('api.admin.audit-logs');
+});

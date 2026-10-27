@@ -115,9 +115,38 @@ class User extends Authenticatable
         'is_active' => 'integer',
         'is_verified' => 'integer',
         'is_deleted' => 'integer',
+        'delete_request' => 'integer',
+        'delete_approved' => 'integer',
+        'delete_requested_at' => 'datetime',
+        'delete_approved_at' => 'datetime',
+        'role' => 'string',
         'created_at' => 'datetime',
         'modified_at' => 'datetime',
     ];
+
+    /**
+     * Check if user is a customer.
+     */
+    public function isCustomer(): bool
+    {
+        return ($this->role ?? 'customer') === 'customer';
+    }
+
+    /**
+     * Check if user is an operator.
+     */
+    public function isOperator(): bool
+    {
+        return ($this->role ?? '') === 'operator';
+    }
+
+    /**
+     * Check if user is a super admin.
+     */
+    public function isSuperAdmin(): bool
+    {
+        return ($this->role ?? '') === 'super_admin';
+    }
 
     /**
      * Check if user has an active, paid membership package.
@@ -291,4 +320,21 @@ class User extends Authenticatable
     {
         return $this->daysSinceRegistration() <= 3;
     }
+
+    /**
+     * Relationship: Registered browser push subscriptions.
+     */
+    public function pushSubscriptions(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(PushSubscription::class, 'user_id', 'user_id');
+    }
+
+    /**
+     * Relationship: Stored member notifications.
+     */
+    public function notifications(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Notification::class, 'user_id', 'user_id');
+    }
 }
+
