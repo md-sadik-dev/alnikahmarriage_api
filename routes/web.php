@@ -29,6 +29,8 @@ Route::post('/login', [AuthApiController::class, 'login'])->middleware('throttle
 Route::post('/signup', [AuthApiController::class, 'register'])->name('signup.post');
 Route::get('/logout', [AuthApiController::class, 'logout'])->name('logout.get');
 Route::post('/logout', [AuthApiController::class, 'logout'])->name('logout.post');
+Route::post('/forgot-password/request', [AuthApiController::class, 'forgotPasswordRequest'])->name('forgot-password.request');
+Route::post('/forgot-password/reset', [AuthApiController::class, 'forgotPasswordReset'])->name('forgot-password.reset');
 Route::post('/contact-us', [PageController::class, 'submitFeedback'])->name('contact.post');
 Route::post('/feedback', [PageController::class, 'submitFeedback'])->name('feedback.post');
 
@@ -37,6 +39,7 @@ Route::get('api/photo/{filename}', [ProfileApiController::class, 'getPhoto']);
 
 // Route direct storage/users and uploads access through the authorization-checked endpoint
 Route::get('storage/users/{filename}', [ProfileApiController::class, 'getPhoto']);
+Route::get('uploads/user-image/{filename}', [ProfileApiController::class, 'getPhoto']);
 Route::get('uploads/{filename}', [ProfileApiController::class, 'getPhoto']);
 
 // Web prefix API fallbacks for backwards compatibility
@@ -67,27 +70,29 @@ Route::prefix('api/gallery')->group(function () {
 });
 Route::get('api/success-stories', [GalleryApiController::class, 'index']);
 
-// Web Migration Route for Shared Hosting (Protected with Secret Key)
+// Web Migration Route: Disabled by default for production security.
+// To run migrations safely, use CLI: php artisan migrate
+// If strictly needed on shared hosting, set ALLOW_WEB_MIGRATIONS=true and MIGRATION_ROUTE_SECRET in .env
 Route::get('/run-migration-live', function (Request $request) {
-    //  Change this to your own secret key
-    $secretKey = 'AlNikahMigrate2026';
-    if ($request->query('key') !== $secretKey) {
-        abort(403, 'Unauthorized access! Secret key is missing or invalid.');
+    $allowWebMigrations = filter_var(env('ALLOW_WEB_MIGRATIONS', false), FILTER_VALIDATE_BOOLEAN);
+    $secretKey = env('MIGRATION_ROUTE_SECRET');
+
+    if (!$allowWebMigrations || empty($secretKey) || !hash_equals($secretKey, (string)$request->query('key'))) {
+        abort(404);
     }
+
     try {
-        // Prevent timeout on slow shared hosting
         ini_set('max_execution_time', 300);
         Artisan::call('migrate', ['--force' => true]);
         $output = Artisan::output();
-        return '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; padding: 25px; background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; border-radius: 10px; max-width: 650px; margin: 50px auto; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">'
+        return '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; padding: 25px; background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; border-radius: 10px; max-width: 650px; margin: 50px auto;">'
             . '<h2 style="margin-top:0; color: #15803d;">✅ Migration Executed Successfully!</h2>'
             . '<pre style="background: #ffffff; padding: 15px; border-radius: 6px; color: #334155; border: 1px solid #e2e8f0; overflow-x: auto; font-size: 13px;">' 
-            . ($output ?: 'Database is already up to date! Nothing to migrate.') 
+            . htmlspecialchars($output ?: 'Database is already up to date! Nothing to migrate.') 
             . '</pre>'
-            . '<p style="font-size: 12px; color: #64748b; margin-bottom: 0;">💡 Tip: Live update hone ke baad aap security ke liye iss route ko web.php se remove ya comment kar sakte hain.</p>'
             . '</div>';
     } catch (\Throwable $e) {
-        return '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; padding: 25px; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; border-radius: 10px; max-width: 650px; margin: 50px auto; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">'
+        return '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; padding: 25px; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; border-radius: 10px; max-width: 650px; margin: 50px auto;">'
             . '<h2 style="margin-top:0; color: #b91c1c;">❌ Migration Error</h2>'
             . '<p style="background: #ffffff; padding: 15px; border-radius: 6px; color: #334155; border: 1px solid #fee2e2; font-size: 13px;">' 
             . htmlspecialchars($e->getMessage()) 

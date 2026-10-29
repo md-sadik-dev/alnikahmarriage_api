@@ -147,6 +147,23 @@ class PageController extends Controller
         $subject = !empty($validated['subject']) ? substr(trim($validated['subject']), 0, 50) : null;
         $message = !empty($validated['message']) ? substr(trim($validated['message']), 0, 500) : null;
 
+        // Prevent accidental duplicate submissions within 10 seconds
+        $recentDuplicate = \App\Models\Query::where('phone', $phone)
+            ->where('message', $message)
+            ->where('created_at', '>=', now()->subSeconds(10))
+            ->first();
+
+        if ($recentDuplicate) {
+            if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson() || $request->expectsJson() || $request->header('Accept') === 'application/json') {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'JazakAllah Khair! Your query/feedback has been received. Our team will contact you shortly.',
+                    'data' => $recentDuplicate,
+                ]);
+            }
+            return redirect()->back()->with('success', 'JazakAllah Khair! Your message has been received. Our team will contact you shortly.');
+        }
+
         $query = \App\Models\Query::create([
             'name' => $name,
             'phone' => $phone,

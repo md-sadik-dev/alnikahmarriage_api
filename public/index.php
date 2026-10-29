@@ -15,7 +15,7 @@ require __DIR__.'/../vendor/autoload.php';
 
 if (isset($_SERVER['REQUEST_URI'])) {
     $uriPath = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-    if (preg_match('#^(.*?)/api(/.*)?$#', $uriPath, $m)) {
+    if (preg_match('#^(.*?)/(api|uploads|storage)(/.*)?$#', $uriPath, $m)) {
         $_SERVER['SCRIPT_NAME'] = $m[1] . '/index.php';
     }
 }

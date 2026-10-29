@@ -25,6 +25,10 @@ Route::get('/me', [AuthApiController::class, 'me'])->name('api.me');
 Route::post('/logout', [AuthApiController::class, 'logout'])->name('api.logout');
 Route::get('/logout', [AuthApiController::class, 'logout'])->name('api.logout.get');
 
+// Password Recovery Endpoints
+Route::post('/forgot-password/request', [AuthApiController::class, 'forgotPasswordRequest'])->name('api.forgot-password.request');
+Route::post('/forgot-password/reset', [AuthApiController::class, 'forgotPasswordReset'])->name('api.forgot-password.reset');
+
 // OTP Endpoints (Signup Verification)
 Route::post('/send-otp', [OtpApiController::class, 'sendOtp'])->name('api.otp.send');
 Route::post('/verify-otp', [OtpApiController::class, 'verifyOtp'])->name('api.otp.verify');
