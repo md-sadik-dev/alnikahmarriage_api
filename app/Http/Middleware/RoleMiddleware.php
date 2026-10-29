@@ -42,11 +42,6 @@ class RoleMiddleware
         if (!$currentUser) {
             $userId = session('user_id') ?: Auth::id();
 
-            if (!$userId && $request->hasHeader('X-User-Id')) {
-                $hdr = (int) $request->header('X-User-Id');
-                if ($hdr > 0) $userId = $hdr;
-            }
-
             if ($userId) {
                 $user = User::where('user_id', $userId)
                     ->where(function ($q) {

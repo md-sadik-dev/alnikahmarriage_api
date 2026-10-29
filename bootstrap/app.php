@@ -25,6 +25,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'contact-us',
             'feedback',
             'queries',
+            'forgot-password',
+            'forgot-password/*',
             'api/*',
         ]);
 

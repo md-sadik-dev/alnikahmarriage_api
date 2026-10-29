@@ -254,9 +254,7 @@ class ProfileApiController extends Controller
 
         if ($request->boolean('paginate', false)) {
             $paginator = $query->paginate($limit);
-            $transformed = $paginator->getCollection()->map(function ($user) use ($viewer, $request) {
-                return $this->formatUserProfile($user, false, $viewer, $request);
-            });
+            $transformed = $this->formatBatchProfiles($paginator->getCollection(), false, $viewer, $request);
             $paginator->setCollection($transformed);
 
             return response()->json([
@@ -272,9 +270,7 @@ class ProfileApiController extends Controller
         }
 
         $users = $query->take($limit)->get();
-        $formatted = $users->map(function ($user) use ($viewer, $request) {
-            return $this->formatUserProfile($user, false, $viewer, $request);
-        });
+        $formatted = $this->formatBatchProfiles($users, false, $viewer, $request);
 
         return response()->json([
             'success' => true,
@@ -335,15 +331,13 @@ class ProfileApiController extends Controller
         if ($viewer) {
             // Logged in: show opposite gender only
             $oppositeType = (strtoupper(trim($viewer->user_type ?? '')) === 'BRIDE') ? 'GROOM' : 'BRIDE';
-            $featured = $baseQuery()
+            $featuredUsers = $baseQuery()
                 ->where('user_type', $oppositeType)
                 ->orderBy('is_active', 'desc')
                 ->orderBy('user_id', 'desc')
                 ->take($limitEach * 2)
-                ->get()
-                ->map(function ($user) use ($viewer, $request) {
-                    return $this->formatUserProfile($user, false, $viewer, $request);
-                });
+                ->get();
+            $featured = $this->formatBatchProfiles($featuredUsers, false, $viewer, $request);
 
             return response()->json([
                 'success' => true,
@@ -368,9 +362,7 @@ class ProfileApiController extends Controller
             ->take($limitEach)
             ->get();
 
-        $combined = $grooms->concat($brides)->map(function ($user) use ($viewer, $request) {
-            return $this->formatUserProfile($user, false, $viewer, $request);
-        });
+        $combined = $this->formatBatchProfiles($grooms->concat($brides), false, $viewer, $request);
 
         return response()->json([
             'success' => true,
@@ -491,53 +483,73 @@ class ProfileApiController extends Controller
             ], 403);
         }
 
-        // Check 3: Check package view limits in profile_view_limits table
-        $limits = $viewer->getProfileViewLimits();
-        if (!$limits) {
-            return response()->json([
-                'success' => false,
-                'view_status' => 'limit_reached_package',
-                'message' => 'No active package view limit found. Please select a membership package to unlock contacts.',
-            ], 403);
-        }
+        // Check 3: Check package view limits & unlock atomically within a database transaction
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($viewer, $user, $request) {
+            $limits = \Illuminate\Support\Facades\DB::table('profile_view_limits')
+                ->where('viewer_user_id', $viewer->user_id)
+                ->lockForUpdate()
+                ->first();
 
-        $packageLimit = (int) $limits->package_profile_limit;
-        $usePackageLimit = (int) $limits->use_package_profile_limit;
+            if (!$limits) {
+                return response()->json([
+                    'success' => false,
+                    'view_status' => 'limit_reached_package',
+                    'message' => 'No active package view limit found. Please select a membership package to unlock contacts.',
+                ], 403);
+            }
 
-        if ($usePackageLimit >= $packageLimit) {
+            // Verify if unlocked in concurrent transaction
+            $alreadyViewed = \Illuminate\Support\Facades\DB::table('profile_views')
+                ->where('viewer_user_id', $viewer->user_id)
+                ->where('profile_user_id', $user->user_id)
+                ->exists();
+
+            if ($alreadyViewed) {
+                return response()->json([
+                    'success' => true,
+                    'view_status' => 'viewed',
+                    'message' => 'Candidate contact details already unlocked.',
+                    'data' => $this->formatUserProfile($user, true, $viewer, $request),
+                ]);
+            }
+
+            $packageLimit = (int) $limits->package_profile_limit;
+            $usePackageLimit = (int) $limits->use_package_profile_limit;
+
+            if ($usePackageLimit >= $packageLimit) {
+                return response()->json([
+                    'success' => false,
+                    'view_status' => 'limit_reached_package',
+                    'message' => 'You have reached your package profile view limit (' . $packageLimit . ' profiles). Please upgrade your package to unlock more contacts.',
+                    'package_profile_limit' => $packageLimit,
+                    'use_package_profile_limit' => $usePackageLimit,
+                    'remaining_views' => 0,
+                ], 403);
+            }
+
+            \Illuminate\Support\Facades\DB::table('profile_view_limits')
+                ->where('limit_id', $limits->limit_id)
+                ->increment('use_package_profile_limit');
+
+            \Illuminate\Support\Facades\DB::table('profile_views')->insert([
+                'viewer_user_id' => $viewer->user_id,
+                'profile_user_id' => $user->user_id,
+                'viewed_at' => now(),
+            ]);
+
+            $newUsed = $usePackageLimit + 1;
+            $remainingViews = max(0, $packageLimit - $newUsed);
+
             return response()->json([
-                'success' => false,
-                'view_status' => 'limit_reached_package',
-                'message' => 'You have reached your package profile view limit (' . $packageLimit . ' profiles). Please upgrade your package to unlock more contacts.',
+                'success' => true,
+                'view_status' => 'success',
+                'message' => 'Candidate contact details unlocked successfully! (' . $remainingViews . ' views remaining)',
                 'package_profile_limit' => $packageLimit,
-                'use_package_profile_limit' => $usePackageLimit,
-                'remaining_views' => 0,
-            ], 403);
-        }
-
-        // Check 4: Success - Increment use_package_profile_limit and record in profile_views
-        \Illuminate\Support\Facades\DB::table('profile_view_limits')
-            ->where('viewer_user_id', $viewer->user_id)
-            ->increment('use_package_profile_limit');
-
-        \Illuminate\Support\Facades\DB::table('profile_views')->insert([
-            'viewer_user_id' => $viewer->user_id,
-            'profile_user_id' => $user->user_id,
-            'viewed_at' => now(),
-        ]);
-
-        $newUsed = $usePackageLimit + 1;
-        $remainingViews = max(0, $packageLimit - $newUsed);
-
-        return response()->json([
-            'success' => true,
-            'view_status' => 'success',
-            'message' => 'Candidate contact details unlocked successfully! (' . $remainingViews . ' views remaining)',
-            'package_profile_limit' => $packageLimit,
-            'use_package_profile_limit' => $newUsed,
-            'remaining_views' => $remainingViews,
-            'data' => $this->formatUserProfile($user, true, $viewer, $request),
-        ]);
+                'use_package_profile_limit' => $newUsed,
+                'remaining_views' => $remainingViews,
+                'data' => $this->formatUserProfile($user, true, $viewer, $request),
+            ]);
+        });
     }
 
     /**
@@ -574,33 +586,6 @@ class ProfileApiController extends Controller
                 ->first();
             if ($user) {
                 return $user;
-            }
-        }
-
-        // 4. Custom X-User-Id header for headless client communication
-        if ($req->hasHeader('X-User-Id')) {
-            $hdrId = (int) $req->header('X-User-Id');
-            if ($hdrId > 0) {
-                $user = User::where('user_id', $hdrId)
-                    ->where(function ($q) {
-                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
-                    })
-                    ->first();
-                if ($user) {
-                    return $user;
-                }
-            }
-        }
-
-        // 5. Query param viewer_id (for direct image / API links)
-        if ($req->filled('viewer_id')) {
-            $vId = (int) $req->input('viewer_id');
-            if ($vId > 0) {
-                return User::where('user_id', $vId)
-                    ->where(function ($q) {
-                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
-                    })
-                    ->first();
             }
         }
 
@@ -644,11 +629,64 @@ class ProfileApiController extends Controller
      *
      * @param User $user
      * @param bool $detailed
+    /**
+     * Format a collection of users efficiently with pre-fetched relations to eliminate N+1 queries.
+     */
+    public function formatBatchProfiles($users, bool $detailed = false, $viewerUser = null, ?Request $request = null)
+    {
+        if (empty($users) || (is_object($users) && method_exists($users, 'isEmpty') && $users->isEmpty())) {
+            return collect();
+        }
+
+        $viewer = $viewerUser ?: $this->resolveViewer($request ?: request());
+        $userCollection = collect($users);
+        $userIds = $userCollection->pluck('user_id')->filter()->toArray();
+
+        // 1. Single query for all users_images
+        $allImagesGrouped = \Illuminate\Support\Facades\DB::table('users_images')
+            ->whereIn('user_id', $userIds)
+            ->orderByDesc('main')
+            ->orderBy('image_id', 'asc')
+            ->get()
+            ->groupBy('user_id');
+
+        // 2. Single query for viewed profile records
+        $viewedMap = [];
+        if ($viewer) {
+            $viewedIds = \Illuminate\Support\Facades\DB::table('profile_views')
+                ->where('viewer_user_id', $viewer->user_id)
+                ->whereIn('profile_user_id', $userIds)
+                ->pluck('profile_user_id')
+                ->toArray();
+            $viewedMap = array_flip($viewedIds);
+        }
+
+        // 3. Pre-fetch limits once for viewer
+        $viewerLimits = $viewer ? $viewer->getProfileViewLimits() : null;
+
+        $preloaded = [
+            'images' => $allImagesGrouped,
+            'viewed' => $viewedMap,
+            'limits' => $viewerLimits,
+        ];
+
+        return $userCollection->map(function ($u) use ($detailed, $viewer, $request, $preloaded) {
+            return $this->formatUserProfile($u, $detailed, $viewer, $request, $preloaded);
+        });
+    }
+
+    /**
+     * Format a single user profile response contract.
+     * Supports optional $preloaded data array to avoid N+1 queries.
+     *
+     * @param User $user
+     * @param bool $detailed
      * @param User|null $viewerUser
      * @param Request|null $request
+     * @param array $preloaded
      * @return array
      */
-    public function formatUserProfile($user, bool $detailed = false, $viewerUser = null, ?Request $request = null): array
+    public function formatUserProfile($user, bool $detailed = false, $viewerUser = null, ?Request $request = null, array $preloaded = []): array
     {
         $viewer = $viewerUser ?: $this->resolveViewer($request ?: request());
         $isSelf = ($viewer && $viewer->user_id == $user->user_id);
@@ -662,12 +700,6 @@ class ProfileApiController extends Controller
         // -------------------------------------------------------------
         // ACCESS CONTROL DECISION ENGINE (Section C Paywall Protection)
         // -------------------------------------------------------------
-        // 1. Self viewing own profile -> Full unblurred access & full contacts
-        // 2. Already viewed by viewer (profile_views table) -> Full unblurred access & full contacts
-        // 3. Viewer has NOT logged in (Guest) -> Blurred photo & hidden contacts ('login_required')
-        // 4. Viewer package has expired (end_date < today) -> Blurred photo & hidden contacts ('package_expired')
-        // 5. Viewer has active package -> Photo unblurred, contact hidden until unlocked via quota ('unlockable' / 'limit_reached_package')
-        // -------------------------------------------------------------
         $hasViewed = false;
         $viewStatus = 'login_required';
         $limits = null;
@@ -678,8 +710,8 @@ class ProfileApiController extends Controller
             $canViewContact = true;
             $viewStatus = 'self';
         } elseif ($viewer) {
-            $hasViewed = $viewer->hasViewedProfile($user->user_id);
-            $limits = $viewer->getProfileViewLimits();
+            $hasViewed = isset($preloaded['viewed']) ? isset($preloaded['viewed'][$user->user_id]) : $viewer->hasViewedProfile($user->user_id);
+            $limits = array_key_exists('limits', $preloaded) ? $preloaded['limits'] : $viewer->getProfileViewLimits();
             $pkgLimit = $limits ? (int) $limits->package_profile_limit : 0;
             $usedLimit = $limits ? (int) $limits->use_package_profile_limit : 0;
             $remainingLimit = max(0, $pkgLimit - $usedLimit);
@@ -745,30 +777,40 @@ class ProfileApiController extends Controller
         $allImages = [];
         $photosGallery = [];
 
-        // Fetch all active photos for this user from users_images
-        $dbImages = \Illuminate\Support\Facades\DB::table('users_images')
-            ->where('user_id', $user->user_id)
-            ->where('is_active', 1)
-            ->orderByDesc('main')
-            ->orderBy('image_id', 'asc')
-            ->get();
+        // Fetch all photos for this user from users_images (support both new and legacy records)
+        $seenFilenames = [];
+        if (isset($preloaded['images'])) {
+            $dbImages = $preloaded['images']->get($user->user_id, collect());
+        } else {
+            $dbImages = \Illuminate\Support\Facades\DB::table('users_images')
+                ->where('user_id', $user->user_id)
+                ->orderByDesc('main')
+                ->orderBy('image_id', 'asc')
+                ->get();
+        }
 
         if ($dbImages->isNotEmpty()) {
             foreach ($dbImages as $row) {
-                $isMainPhoto = ((int) $row->main === 1) || (!empty($user->profile_pic) && $row->images === $user->profile_pic);
-                $localPath = $resolveLocalPhoto($row->images);
+                $rawImg = trim($row->images ?? '');
+                if (empty($rawImg)) continue;
+                $key = strtolower($rawImg);
+                if (isset($seenFilenames[$key])) continue;
+                $seenFilenames[$key] = true;
+
+                $isMainPhoto = ((int) $row->main === 1) || (!empty($user->profile_pic) && $rawImg === $user->profile_pic);
+                $localPath = $resolveLocalPhoto($rawImg);
 
                 $photoUrl = $isBlurred
-                    ? url('/api/photo/blurred/' . rawurlencode($row->images))
-                    : url('/api/photo/' . rawurlencode($row->images));
+                    ? url('/api/photo/blurred/' . rawurlencode($rawImg))
+                    : url('/api/photo/' . rawurlencode($rawImg));
 
                 if (!in_array($photoUrl, $allImages)) {
                     $allImages[] = $photoUrl;
                 }
 
                 $photosGallery[] = [
-                    'id' => $row->image_id,
-                    'filename' => $row->images,
+                    'id' => (int) $row->image_id,
+                    'filename' => $rawImg,
                     'url' => $photoUrl,
                     'main' => $isMainPhoto ? 1 : 0,
                 ];
@@ -787,38 +829,84 @@ class ProfileApiController extends Controller
             }
         }
 
-        // Fallback for profile_pic not yet in users_images or if dbImages was empty
-        if (!empty($user->profile_pic) && empty($imageUrl)) {
-            $localPath = $resolveLocalPhoto($user->profile_pic);
-            $photoUrl = $isBlurred
-                ? url('/api/photo/blurred/' . rawurlencode($user->profile_pic))
-                : url('/api/photo/' . rawurlencode($user->profile_pic));
+        // Include users.profile_pic if present and not already added from users_images
+        $mainPic = trim($user->profile_pic ?? '');
+        if (!empty($mainPic)) {
+            $key = strtolower($mainPic);
+            if (!isset($seenFilenames[$key])) {
+                $seenFilenames[$key] = true;
+                $localPath = $resolveLocalPhoto($mainPic);
+                $photoUrl = $isBlurred
+                    ? url('/api/photo/blurred/' . rawurlencode($mainPic))
+                    : url('/api/photo/' . rawurlencode($mainPic));
 
-            $imageUrl = $photoUrl;
-            $photoStreamUrl = $photoUrl;
-            if (!$isBlurred && $localPath) {
-                $mime = @mime_content_type($localPath) ?: 'image/jpeg';
-                $fileBytes = @file_get_contents($localPath);
-                if ($fileBytes) {
-                    $base64Photo = 'data:' . $mime . ';base64,' . base64_encode($fileBytes);
-                }
-            }
-            if (!in_array($photoUrl, $allImages)) {
-                array_unshift($allImages, $photoUrl);
-            }
-            if (empty($photosGallery)) {
-                $photosGallery[] = [
+                $isMain = empty($imageUrl);
+                $item = [
                     'id' => 0,
-                    'filename' => $user->profile_pic,
+                    'filename' => $mainPic,
                     'url' => $photoUrl,
-                    'main' => 1,
+                    'main' => $isMain ? 1 : 0,
                 ];
+
+                if ($isMain) {
+                    array_unshift($photosGallery, $item);
+                    array_unshift($allImages, $photoUrl);
+                    $imageUrl = $photoUrl;
+                    $photoStreamUrl = $photoUrl;
+                    if (!$isBlurred && $localPath) {
+                        $mime = @mime_content_type($localPath) ?: 'image/jpeg';
+                        $fileBytes = @file_get_contents($localPath);
+                        if ($fileBytes) {
+                            $base64Photo = 'data:' . $mime . ';base64,' . base64_encode($fileBytes);
+                        }
+                    }
+                } else {
+                    $photosGallery[] = $item;
+                    if (!in_array($photoUrl, $allImages)) {
+                        $allImages[] = $photoUrl;
+                    }
+                }
             }
         }
 
+        // Include users.profile_pic1 (secondary photo for old/legacy users)
+        $secPic = trim($user->profile_pic1 ?? '');
+        if (!empty($secPic)) {
+            $key = strtolower($secPic);
+            if (!isset($seenFilenames[$key])) {
+                $seenFilenames[$key] = true;
+                $localPath = $resolveLocalPhoto($secPic);
+                $photoUrl = $isBlurred
+                    ? url('/api/photo/blurred/' . rawurlencode($secPic))
+                    : url('/api/photo/' . rawurlencode($secPic));
+
+                $photosGallery[] = [
+                    'id' => 0,
+                    'filename' => $secPic,
+                    'url' => $photoUrl,
+                    'main' => empty($imageUrl) ? 1 : 0,
+                ];
+                if (!in_array($photoUrl, $allImages)) {
+                    $allImages[] = $photoUrl;
+                }
+            }
+        }
+
+        // Ensure primary image URLs are defined if images exist
         if (!$imageUrl && !empty($allImages)) {
             $imageUrl = $allImages[0];
             $photoStreamUrl = $allImages[0];
+            if (!empty($photosGallery)) {
+                $photosGallery[0]['main'] = 1;
+                $localPath = $resolveLocalPhoto($photosGallery[0]['filename']);
+                if (!$isBlurred && $localPath) {
+                    $mime = @mime_content_type($localPath) ?: 'image/jpeg';
+                    $fileBytes = @file_get_contents($localPath);
+                    if ($fileBytes) {
+                        $base64Photo = 'data:' . $mime . ';base64,' . base64_encode($fileBytes);
+                    }
+                }
+            }
         }
 
         // Format City
@@ -1561,16 +1649,31 @@ class ProfileApiController extends Controller
             ->where('is_active', 1)
             ->exists();
 
+        $allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
+        $extMap = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+
         foreach ($files as $idx => $file) {
             if (!$file || !$file->isValid()) continue;
 
-            $ext = strtolower($file->getClientOriginalExtension());
-            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])) {
+            // 1. File size limit: max 5MB
+            if ($file->getSize() > 5242880) {
                 continue;
             }
 
-            $cleanName = preg_replace('/[^a-zA-Z0-9._-]/', '_', $file->getClientOriginalName());
-            $filename = time() . '-img' . ($idx + 1) . '-' . uniqid() . '.' . $ext;
+            // 2. Server-side MIME check
+            $mime = $file->getMimeType();
+            if (!in_array($mime, $allowedMimes, true)) {
+                continue;
+            }
+
+            // 3. Structural image verification
+            $imgInfo = @getimagesize($file->getPathname());
+            if ($imgInfo === false) {
+                continue;
+            }
+
+            $ext = $extMap[$mime] ?? 'jpg';
+            $filename = time() . '-img' . ($idx + 1) . '-' . \Illuminate\Support\Str::random(10) . '.' . $ext;
 
             $file->move($destDir, $filename);
             @copy($destDir . '/' . $filename, $pubDir . '/' . $filename);

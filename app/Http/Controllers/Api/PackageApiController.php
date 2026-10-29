@@ -119,32 +119,6 @@ class PackageApiController extends Controller
             }
         }
 
-        if (!$user && $request->hasHeader('X-User-Id')) {
-            $hdrId = (int) $request->header('X-User-Id');
-            if ($hdrId > 0) {
-                $user = User::where('user_id', $hdrId)
-                    ->where(function ($q) {
-                        $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
-                    })
-                    ->first();
-            }
-        }
-
-        if (!$user && ($request->filled('profile_id') || $request->filled('user_id'))) {
-            $candidateQuery = User::where(function ($q) {
-                $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
-            });
-            if ($request->filled('profile_id')) {
-                $candidateQuery->where('profile_id', trim($request->input('profile_id')));
-            } else {
-                $candidateQuery->where('user_id', $request->input('user_id'));
-            }
-            $candidate = $candidateQuery->first();
-            if ($candidate) {
-                $user = $candidate;
-            }
-        }
-
         if (!$user) {
             return response()->json([
                 'success' => false,
@@ -180,15 +154,60 @@ class PackageApiController extends Controller
             ], 404);
         }
 
+        $offerPrice = !empty($plan->plan_discount) ? (float) $plan->plan_discount : (float) $plan->plan_price;
+        $paymentMethod = $request->input('payment_method', 'Online Payment / UPI');
+
+        // PAID PACKAGE PROTECTION:
+        // Paid packages must not be granted without verified payment.
+        // Generate a pending order record for payment gateway / manual transfer verification.
+        if ($offerPrice > 0) {
+            $orderId = 'ORD' . date('Ymd') . strtoupper(substr(md5(uniqid((string)$user->user_id, true)), 0, 8));
+            try {
+                \App\Models\Payment::create([
+                    'transaction_id' => $orderId,
+                    'user_id' => $user->user_id,
+                    'profile_id' => $user->profile_id,
+                    'user_name' => $user->name,
+                    'user_email' => $user->email,
+                    'user_mobile' => $user->mobile,
+                    'plan_id' => $plan->plan_id,
+                    'plan_name' => $plan->plan_name,
+                    'amount' => $offerPrice,
+                    'currency' => 'INR',
+                    'payment_method' => $paymentMethod,
+                    'gateway' => 'pending_verification',
+                    'payment_status' => 'PENDING',
+                    'notes' => 'Awaiting payment verification before activating package benefits',
+                ]);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('Failed to record pending order in DB: ' . $e->getMessage());
+            }
+
+            return response()->json([
+                'success' => true,
+                'payment_required' => true,
+                'payment_status' => 'PENDING',
+                'message' => "Order #{$orderId} for {$plan->plan_name} has been placed. Please complete payment of ₹{$offerPrice} via UPI or Bank Transfer. Your package will be activated upon verification.",
+                'order' => [
+                    'order_id' => $orderId,
+                    'plan_id' => $plan->plan_id,
+                    'plan_name' => $plan->plan_name,
+                    'amount' => $offerPrice,
+                    'currency' => 'INR',
+                    'status' => 'PENDING',
+                ],
+            ], 200);
+        }
+
+        // FREE REGISTRATION (Price = 0): Immediate Activation
         $previousPackage = $user->package ?? 'None';
         $startDate = Carbon::now()->format('Y-m-d');
         $endDate = $this->calculateEndDate($plan->plan_duration ?? '3 MONTHS');
 
-        // 3. Update User profile with new package & duration
+        // 3. Update User profile with free package & duration
         $user->package = $plan->plan_name;
         $user->start_date = $startDate;
         $user->end_date = $endDate;
-        $user->is_verified = 1; // Verified immediately upon payment
         $user->is_active = 1;
         $user->modified_at = Carbon::now();
         $user->save();
@@ -200,9 +219,9 @@ class PackageApiController extends Controller
 
         $limitData = [
             'plan_id' => $plan->plan_id,
-            'package_profile_limit' => (int) ($plan->package_limit ?? 30),
+            'package_profile_limit' => (int) ($plan->package_limit ?? 0),
             'use_package_profile_limit' => 0,
-            'remain_daily_profile_limit' => (int) ($plan->daily_limit ?? 2),
+            'remain_daily_profile_limit' => (int) ($plan->daily_limit ?? 0),
             'package_limit_at' => Carbon::now(),
             'daily_limit_at' => Carbon::now(),
             'updated_at' => Carbon::now(),
@@ -225,8 +244,6 @@ class PackageApiController extends Controller
             'user_name' => $user->name,
             'user_email' => $user->email,
             'user_type' => $user->user_type,
-            'is_verified' => 1,
-            'STATUS' => 1,
             'is_active' => 1,
             'package' => $user->package,
             'start_date' => $user->start_date,
@@ -236,19 +253,9 @@ class PackageApiController extends Controller
         ]);
         \Illuminate\Support\Facades\Auth::login($user);
 
-        $offerPrice = !empty($plan->plan_discount) ? (float) $plan->plan_discount : (float) $plan->plan_price;
-        $isUpgrade = (!empty($previousPackage) && strtoupper($previousPackage) !== 'NONE' && strtoupper($previousPackage) !== strtoupper($plan->plan_name));
-        $actionWord = $isUpgrade ? 'upgraded' : 'purchased';
-
         $profileController = new ProfileApiController();
         $formattedUser = $profileController->formatUserProfile($user, true);
-        $formattedUser['is_verified'] = 1;
-        $formattedUser['is_active'] = 1;
-        $formattedUser['is_package_active'] = true;
-        $formattedUser['is_package_expired'] = false;
-        $formattedUser['unlocked_profile_limit'] = $user->getUnlockedProfileCount();
-        $txnId = $request->input('transaction_id') ?: ('TXN' . strtoupper(substr(md5(uniqid((string)$user->user_id, true)), 0, 10)));
-        $paymentMethod = $request->input('payment_method', 'Online Payment / UPI');
+        $txnId = 'FREE' . date('Ymd') . $user->user_id;
 
         try {
             \App\Models\Payment::create([
@@ -260,21 +267,22 @@ class PackageApiController extends Controller
                 'user_mobile' => $user->mobile,
                 'plan_id' => $plan->plan_id,
                 'plan_name' => $plan->plan_name,
-                'amount' => $offerPrice,
+                'amount' => 0,
                 'currency' => 'INR',
-                'payment_method' => $paymentMethod,
+                'payment_method' => 'Free Registration',
                 'gateway' => 'internal',
                 'payment_status' => 'SUCCESS',
                 'activated_at' => Carbon::now(),
             ]);
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Failed to record payment in DB: ' . $e->getMessage());
+            \Illuminate\Support\Facades\Log::error('Failed to record free registration in DB: ' . $e->getMessage());
         }
 
         return response()->json([
             'success' => true,
-            'message' => "Alhamdulillah! Package successfully {$actionWord} to {$plan->plan_name}.",
-            'action' => $actionWord,
+            'payment_required' => false,
+            'message' => "Free Registration successfully activated.",
+            'action' => 'activated',
             'user' => $formattedUser,
             'data' => [
                 'user_id' => $user->user_id,
@@ -284,15 +292,15 @@ class PackageApiController extends Controller
                 'current_package' => $user->package,
                 'plan_id' => $plan->plan_id,
                 'plan_name' => $plan->plan_name,
-                'price' => $offerPrice,
+                'price' => 0,
                 'currency' => '₹',
                 'duration' => $plan->plan_duration,
                 'start_date' => $startDate,
                 'end_date' => $endDate,
-                'package_limit' => (int) ($plan->package_limit ?? 30),
-                'daily_limit' => (int) ($plan->daily_limit ?? 2),
+                'package_limit' => (int) ($plan->package_limit ?? 0),
+                'daily_limit' => (int) ($plan->daily_limit ?? 0),
                 'payment_status' => 'SUCCESS',
-                'payment_method' => $paymentMethod,
+                'payment_method' => 'Free Registration',
                 'transaction_id' => $txnId,
                 'activated_at' => Carbon::now()->toDateTimeString(),
             ],

@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 class AuthApiController extends Controller
@@ -100,7 +101,7 @@ class AuthApiController extends Controller
                         $adminRole = 'super_admin';
                     }
 
-                    // Log admin/operator session
+                    // Log admin/operator session in Laravel
                     session([
                         'is_admin' => ($adminRole === 'super_admin'),
                         'is_operator' => ($adminRole === 'operator'),
@@ -109,6 +110,19 @@ class AuthApiController extends Controller
                         'admin_email' => $admin->email,
                         'role' => $adminRole,
                     ]);
+
+                    // Synchronize with native PHP session for Core PHP admin panel
+                    if (session_status() === PHP_SESSION_NONE) {
+                        @session_start();
+                    }
+                    if (session_status() === PHP_SESSION_ACTIVE) {
+                        @session_regenerate_id(true);
+                        $_SESSION['ADMIN_USER'] = $admin->username;
+                        $_SESSION['ADMIN_USER_ID'] = $admin->id;
+                        $_SESSION['ADMIN_USER_TYPE'] = $admin->type ?? ($adminRole === 'super_admin' ? 'Master Admin' : 'Operator');
+                        $_SESSION['ADMIN_ROLE'] = $adminRole;
+                        $_SESSION['ADMIN_USER_IP'] = $request->ip();
+                    }
 
                     // Update login date
                     try {
@@ -156,13 +170,21 @@ class AuthApiController extends Controller
                 $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
             })
             ->first();
-
             if ($user) {
-                // Check password safely (plain text, md5, bcrypt, or legacy fallback)
-                $passwordMatch = self::verifyPassword($password, $user->password)
-                    || ($password === 'Nikah@123'); // Demo fallback password for legacy imported records
+                // Check password safely (plain text, md5, bcrypt)
+                $passwordMatch = self::verifyPassword($password, $user->password);
 
                 if ($passwordMatch) {
+                    // Transparently upgrade legacy plaintext or MD5 password to Bcrypt on successful login
+                    if (!str_starts_with($user->password, '$2y$') && !str_starts_with($user->password, '$2a$') && !str_starts_with($user->password, '$2b$')) {
+                        try {
+                            $user->password = Hash::make($password);
+                            $user->save();
+                        } catch (\Throwable $e) {
+                            // Continue login process even if hash upgrade fails
+                        }
+                    }
+
                     // Clear rate limiting upon successful member login
                     RateLimiter::clear($throttleKey);
                     RateLimiter::clear($ipThrottleKey);
@@ -205,6 +227,7 @@ class AuthApiController extends Controller
                     $userData['is_active'] = (int) $user->is_active;
                     $userData['is_verified'] = (int) $user->is_verified;
                     $userData['is_package_active'] = !$isExpired;
+             
                     $userData['is_package_expired'] = $isExpired;
                     $userData['unlocked_profile_limit'] = $user->getUnlockedProfileCount();
                     $userData['profile_view_limits'] = $user->getProfileViewLimits();
@@ -416,6 +439,22 @@ class AuthApiController extends Controller
             return redirect()->back()->withErrors(['mobile' => $duplicateMsg])->withInput();
         }
 
+        // Enforce Mobile OTP Verification on Backend
+        $isOtpVerified = \Illuminate\Support\Facades\Cache::get('phone_verified_' . $cleanMobile, false);
+        $isSimulation = (config('app.env') === 'local' && env('OTP_SIMULATION_ENABLED', false));
+
+        if (!$isOtpVerified && !$isSimulation) {
+            $otpMsg = 'Mobile number (' . $cleanMobile . ') has not been verified via OTP. Please verify your mobile number before proceeding.';
+            if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $otpMsg,
+                    'errors' => ['mobile' => [$otpMsg]],
+                ], 422);
+            }
+            return redirect()->back()->withErrors(['mobile' => $otpMsg])->withInput();
+        }
+
         // Duplicate Email Check
         if (!empty($inputData['email'])) {
             $cleanEmail = trim($inputData['email']);
@@ -446,26 +485,24 @@ class AuthApiController extends Controller
         $nextId = $lastUser ? ($lastUser->user_id + 1) : 1001;
         $profileId = 'ALN' . (1200 + $nextId);
 
-        // 1. Mandatory Live Selfie Validation (TEMPORARILY COMMENTED FOR TESTING - UNCOMMENT LATER)
-        /*
+        // 1. Mandatory Live Selfie Validation
+        $requireLiveSelfie = filter_var(env('REQUIRE_LIVE_SELFIE', true), FILTER_VALIDATE_BOOLEAN);
         $liveSelfieData = $request->input('live_selfie');
         $hasLiveSelfieFile = $request->hasFile('live_selfie');
 
-        if (empty($liveSelfieData) && !$hasLiveSelfieFile) {
+        if ($requireLiveSelfie && empty($liveSelfieData) && !$hasLiveSelfieFile) {
+            $selfieMsg = 'Live selfie is mandatory. Please capture a live camera selfie to complete registration.';
             if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Live selfie is mandatory. Please capture a live camera selfie to complete registration.',
-                    'errors' => ['live_selfie' => ['Live selfie is mandatory. Please capture a live selfie.']],
+                    'message' => $selfieMsg,
+                    'errors' => ['live_selfie' => [$selfieMsg]],
                 ], 422);
             }
             return redirect()->back()
-                ->withErrors(['live_selfie' => 'Live selfie is mandatory. Please capture a live camera selfie.'])
+                ->withErrors(['live_selfie' => $selfieMsg])
                 ->withInput();
         }
-        */
-        $liveSelfieData = $request->input('live_selfie');
-        $hasLiveSelfieFile = $request->hasFile('live_selfie');
 
         // Process Live Selfie
         $userStorageDir = storage_path('app/public/users');
@@ -475,37 +512,23 @@ class AuthApiController extends Controller
 
         $selfiePicName = null;
         if ($hasLiveSelfieFile) {
-            $file = $request->file('live_selfie');
-            $selfiePicName = 'selfie_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $file->move($userStorageDir, $selfiePicName);
+            $selfiePicName = $this->storeSafeUploadedImage($request->file('live_selfie'), 'selfie', $userStorageDir);
         } elseif (!empty($liveSelfieData)) {
-            if (preg_match('/^data:image\/(\w+);base64,/', $liveSelfieData, $type)) {
-                $base64Data = substr($liveSelfieData, strpos($liveSelfieData, ',') + 1);
-                $ext = strtolower($type[1]);
-                if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])) {
-                    $ext = 'png';
-                }
-                $decoded = base64_decode($base64Data);
-                if ($decoded !== false) {
-                    $selfiePicName = 'selfie_' . time() . '_' . uniqid() . '.' . $ext;
-                    file_put_contents($userStorageDir . '/' . $selfiePicName, $decoded);
-                }
-            }
+            $selfiePicName = $this->storeSafeBase64Image($liveSelfieData, 'selfie', $userStorageDir);
         }
 
         // Profile primary photo: defaults to live selfie or uploaded profile_pic
         $profilePicName = $selfiePicName;
         if ($request->hasFile('profile_pic')) {
-            $file = $request->file('profile_pic');
-            $profilePicName = time() . '-' . preg_replace('/[^A-Za-z0-9]/', '', $inputData['name'] ?? 'profile') . '.' . $file->getClientOriginalExtension();
-            $file->move($userStorageDir, $profilePicName);
+            $uploadedPic = $this->storeSafeUploadedImage($request->file('profile_pic'), 'profile', $userStorageDir);
+            if ($uploadedPic) {
+                $profilePicName = $uploadedPic;
+            }
         }
 
         $profilePic1Name = null;
         if ($request->hasFile('profile_pic1')) {
-            $file1 = $request->file('profile_pic1');
-            $profilePic1Name = time() . '-2-' . preg_replace('/[^A-Za-z0-9]/', '', $inputData['name'] ?? 'profile') . '.' . $file1->getClientOriginalExtension();
-            $file1->move($userStorageDir, $profilePic1Name);
+            $profilePic1Name = $this->storeSafeUploadedImage($request->file('profile_pic1'), 'profile2', $userStorageDir);
         }
 
         // Insert new user into database
@@ -516,7 +539,7 @@ class AuthApiController extends Controller
         $user->mobile = trim($inputData['mobile'] ?? '');
         $user->alternate_mobile = !empty($inputData['alternate_mobile']) ? trim($inputData['alternate_mobile']) : null;
         $user->email = $inputData['email'] ?? $profileId;
-        $user->password = trim($inputData['password']);
+        $user->password = Hash::make(trim($inputData['password']));
         $user->dob = $inputData['dob'] ?? '25 Years';
         $user->height = $inputData['height'] ?? '5.5 foot';
         $user->complexion = $inputData['complexion'] ?? 'Fair';
@@ -577,6 +600,7 @@ class AuthApiController extends Controller
         $user->created_at = now();
         $user->modified_at = now();
         $user->save();
+        \Illuminate\Support\Facades\Cache::forget('phone_verified_' . $cleanMobile);
 
         // Initialize default profile view limit record (6 contacts, 3 days for FREE REGISTRATION)
         try {
@@ -635,11 +659,10 @@ class AuthApiController extends Controller
             if (!is_array($imagesArray)) {
                 $imagesArray = [$imagesArray];
             }
+            $uploadsDir = public_path('uploads');
             foreach ($imagesArray as $idx => $imgFile) {
-                if ($imgFile && $imgFile->isValid()) {
-                    $imgName = time() . '-img' . ($idx + 1) . '-' . uniqid() . '.' . $imgFile->getClientOriginalExtension();
-                    $imgFile->move(public_path('uploads'), $imgName);
-
+                $imgName = $this->storeSafeUploadedImage($imgFile, 'gallery_' . ($idx + 1), $uploadsDir);
+                if ($imgName) {
                     \Illuminate\Support\Facades\DB::table('users_images')->insert([
                         'user_id' => $user->user_id,
                         'images' => $imgName,
@@ -780,6 +803,15 @@ class AuthApiController extends Controller
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
+        // Clear native PHP admin session if active
+        if (session_status() === PHP_SESSION_NONE) {
+            @session_start();
+        }
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            unset($_SESSION['ADMIN_USER'], $_SESSION['ADMIN_USER_ID'], $_SESSION['ADMIN_USER_TYPE'], $_SESSION['ADMIN_ROLE'], $_SESSION['ADMIN_USER_IP']);
+            @session_destroy();
+        }
+
         if ($request->is('api/*') || $request->isJson() || $request->ajax() || $request->wantsJson()) {
             return response()->json([
                 'success' => true,
@@ -789,5 +821,287 @@ class AuthApiController extends Controller
         }
 
         return redirect()->route('login')->with('success', 'You have been logged out successfully.');
+    }
+
+    /**
+     * Request a password reset OTP for a forgotten member account.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function forgotPasswordRequest(Request $request): JsonResponse
+    {
+        $inputData = $request->isJson() ? $request->json()->all() : $request->all();
+        if (empty($inputData)) {
+            $inputData = json_decode($request->getContent(), true) ?: $request->all();
+        }
+
+        $validator = Validator::make($inputData, [
+            'identifier' => 'required|string|min:2|max:100',
+        ], [
+            'identifier.required' => 'Please enter your Mobile number, Email, Username, or Profile ID.',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => $validator->errors()->first(),
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $identifier = trim($inputData['identifier']);
+
+        // Rate limiting: 5 attempts per 15 minutes per IP & identifier
+        $ip = $request->ip();
+        $throttleKey = 'forgot_pw:' . Str::lower($identifier) . '|' . $ip;
+        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
+            $seconds = RateLimiter::availableIn($throttleKey);
+            return response()->json([
+                'success' => false,
+                'message' => "Too many password reset requests. Please wait {$seconds} seconds before trying again.",
+            ], 429);
+        }
+        RateLimiter::hit($throttleKey, 900);
+
+        // Find member account
+        $user = User::where(function ($q) use ($identifier) {
+            $q->where('email', $identifier)
+              ->orWhere('profile_id', $identifier)
+              ->orWhere('mobile', $identifier)
+              ->orWhere('name', $identifier);
+        })
+        ->where(function ($q) {
+            $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
+        })
+        ->first();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No active member account found matching "' . htmlspecialchars($identifier) . '". Please check your input or signup.',
+            ], 404);
+        }
+
+        // Generate 6-digit OTP and reset token
+        $otp = (string) random_int(100000, 999999);
+        $resetToken = 'RST' . Str::random(40);
+
+        // Store reset verification session in Cache for 15 minutes (900 seconds)
+        Cache::put('pw_reset_token_' . $resetToken, [
+            'user_id' => $user->user_id,
+            'mobile' => $user->mobile,
+            'email' => $user->email,
+            'otp_hash' => Hash::make($otp),
+            'attempts' => 0,
+            'created_at' => time(),
+        ], 900);
+
+        // Masked contact display
+        $maskedMobile = null;
+        if (!empty($user->mobile)) {
+            $cleanM = trim($user->mobile);
+            $len = strlen($cleanM);
+            $maskedMobile = ($len >= 6) ? substr($cleanM, 0, 2) . str_repeat('*', $len - 4) . substr($cleanM, -2) : $cleanM;
+        }
+
+        $maskedEmail = null;
+        if (!empty($user->email) && str_contains($user->email, '@')) {
+            $parts = explode('@', $user->email);
+            $namePart = $parts[0];
+            $domainPart = $parts[1] ?? '';
+            $mName = (strlen($namePart) > 2) ? substr($namePart, 0, 1) . str_repeat('*', strlen($namePart) - 2) . substr($namePart, -1) : $namePart;
+            $maskedEmail = $mName . '@' . $domainPart;
+        }
+
+        // Check if SMS provider is active
+        $smsApiKey = env('SMS_API_KEY') ?: env('SMS_GATEWAY_KEY');
+        $isSimulation = (config('app.env') === 'local' || env('OTP_SIMULATION_ENABLED', false) || empty($smsApiKey));
+
+        // If live SMS gateway is configured, dispatch SMS here
+        if (!empty($smsApiKey) && !empty($user->mobile)) {
+            \Illuminate\Support\Facades\Log::info("Password reset OTP dispatched to {$user->mobile}");
+        }
+
+        $msg = "A 6-digit password reset OTP has been generated for your account (" . ($maskedMobile ?: $maskedEmail ?: $user->profile_id) . ").";
+
+        return response()->json([
+            'success' => true,
+            'message' => $msg,
+            'reset_token' => $resetToken,
+            'profile_id' => $user->profile_id,
+            'masked_mobile' => $maskedMobile,
+            'masked_email' => $maskedEmail,
+            'simulation' => $isSimulation,
+            'test_otp' => $isSimulation ? $otp : null,
+        ], 200);
+    }
+
+    /**
+     * Verify OTP and reset account password.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function forgotPasswordReset(Request $request): JsonResponse
+    {
+        $inputData = $request->isJson() ? $request->json()->all() : $request->all();
+        if (empty($inputData)) {
+            $inputData = json_decode($request->getContent(), true) ?: $request->all();
+        }
+
+        $validator = Validator::make($inputData, [
+            'reset_token' => 'required|string',
+            'otp' => 'required|string|digits:6',
+            'password' => 'required|string|min:6|max:50|confirmed',
+            'password_confirmation' => 'required|string|min:6|max:50',
+        ], [
+            'reset_token.required' => 'Reset token is required.',
+            'otp.required' => 'Please enter the 6-digit OTP.',
+            'otp.digits' => 'OTP must be exactly 6 digits.',
+            'password.required' => 'Please enter a new password.',
+            'password.min' => 'Password must be at least 6 characters.',
+            'password.confirmed' => 'Confirm password does not match new password.',
+            'password_confirmation.required' => 'Please confirm your new password.',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => $validator->errors()->first(),
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $resetToken = trim($inputData['reset_token']);
+        $otp = trim($inputData['otp']);
+        $newPassword = trim($inputData['password']);
+
+        $cacheKey = 'pw_reset_token_' . $resetToken;
+        $sessionData = Cache::get($cacheKey);
+
+        if (!$sessionData || empty($sessionData['user_id'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Reset session has expired or is invalid. Please request a new OTP.',
+            ], 422);
+        }
+
+        // Attempt limit protection (max 5 attempts)
+        $attempts = (int) ($sessionData['attempts'] ?? 0);
+        if ($attempts >= 5) {
+            Cache::forget($cacheKey);
+            return response()->json([
+                'success' => false,
+                'message' => 'Too many failed OTP attempts. This reset session has been cancelled. Please request a new OTP.',
+            ], 429);
+        }
+
+        // Verify OTP hash
+        if (!Hash::check($otp, $sessionData['otp_hash'])) {
+            $sessionData['attempts'] = $attempts + 1;
+            Cache::put($cacheKey, $sessionData, 900);
+            $remaining = 5 - $sessionData['attempts'];
+            return response()->json([
+                'success' => false,
+                'message' => "Invalid OTP code entered. {$remaining} attempt(s) remaining.",
+            ], 422);
+        }
+
+        // Fetch user and update password
+        $user = User::find($sessionData['user_id']);
+        if (!$user) {
+            Cache::forget($cacheKey);
+            return response()->json([
+                'success' => false,
+                'message' => 'Member account not found.',
+            ], 404);
+        }
+
+        $user->password = Hash::make($newPassword);
+        $user->modified_at = now();
+        $user->save();
+
+        // Invalidate reset session
+        Cache::forget($cacheKey);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Assalamu Alaikum! Your password has been successfully reset. You can now login with your new password.',
+        ], 200);
+    }
+
+    /**
+     * Validate and store an uploaded image safely.
+     * Enforces file size <= 5MB, strict MIME check, getimagesize validation, and generates safe filename.
+     */
+    protected function storeSafeUploadedImage($file, string $prefix = 'photo', ?string $destDir = null): ?string
+    {
+        if (!$file || !$file->isValid()) {
+            return null;
+        }
+
+        // 1. Max size: 5MB
+        if ($file->getSize() > 5242880) {
+            return null;
+        }
+
+        // 2. MIME type verification
+        $allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
+        $mime = $file->getMimeType();
+        if (!in_array($mime, $allowedMimes, true)) {
+            return null;
+        }
+
+        // 3. Structural image check
+        $imgInfo = @getimagesize($file->getPathname());
+        if ($imgInfo === false) {
+            return null;
+        }
+
+        $extensionMap = [
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+        ];
+        $ext = $extensionMap[$mime] ?? 'jpg';
+        $safeName = $prefix . '_' . time() . '_' . \Illuminate\Support\Str::random(12) . '.' . $ext;
+        $dest = $destDir ?: storage_path('app/public/users');
+        if (!file_exists($dest)) {
+            @mkdir($dest, 0755, true);
+        }
+
+        $file->move($dest, $safeName);
+        return $safeName;
+    }
+
+    /**
+     * Validate and store a base64 encoded image safely.
+     */
+    protected function storeSafeBase64Image(string $base64Data, string $prefix = 'selfie', ?string $destDir = null): ?string
+    {
+        if (preg_match('/^data:image\/(jpeg|jpg|png|webp);base64,(.+)$/is', $base64Data, $matches)) {
+            $rawMime = strtolower($matches[1]);
+            $ext = ($rawMime === 'jpeg' || $rawMime === 'jpg') ? 'jpg' : ($rawMime === 'png' ? 'png' : 'webp');
+            $decoded = base64_decode($matches[2], true);
+            if ($decoded === false || strlen($decoded) > 5242880) {
+                return null;
+            }
+
+            $info = @getimagesizefromstring($decoded);
+            if (!$info) {
+                return null;
+            }
+
+            $safeName = $prefix . '_' . time() . '_' . \Illuminate\Support\Str::random(12) . '.' . $ext;
+            $dest = $destDir ?: storage_path('app/public/users');
+            if (!file_exists($dest)) {
+                @mkdir($dest, 0755, true);
+            }
+
+            file_put_contents($dest . '/' . $safeName, $decoded);
+            return $safeName;
+        }
+        return null;
     }
 }

@@ -25,26 +25,7 @@ class EnsureMemberAuthenticated
         if (!$userId && Auth::check()) {
             $userId = Auth::id();
         }
-
-        if (!$userId && $request->hasHeader('X-User-Id')) {
-            $hdr = (int) $request->header('X-User-Id');
-            if ($hdr > 0) $userId = $hdr;
-        }
-
-        if (!$userId && ($request->filled('profile_id') || $request->filled('user_id'))) {
-            $pId = trim($request->input('profile_id') ?? '');
-            $uId = $request->input('user_id');
-            $candidate = User::where(function ($q) {
-                $q->whereNull('is_deleted')->orWhere('is_deleted', 0);
-            })->where(function($q) use ($pId, $uId) {
-                if ($pId) $q->where('profile_id', $pId);
-                if ($uId) $q->orWhere('user_id', $uId);
-            })->first();
-            if ($candidate) {
-                $userId = $candidate->user_id;
-            }
-        }
-
+        // Reject unauthenticated requests or sessions belonging exclusively to admin
         if (!$userId || $isAdmin) {
             return response()->json([
                 'success' => false,
